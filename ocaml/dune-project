@@ -1,0 +1,12 @@
+(lang dune 3.7)
+
+(name kitchen_sink_ocaml)
+
+(source
+ (github wasabi315/kitchen-sink-ocaml))
+
+(authors "Satoshi Takimoto")
+
+(maintainers "Satoshi Takimoto")
+
+(license LICENSE)
