@@ -26,4 +26,6 @@ executable fib-bench
         base ^>=4.16.4.0,
         criterion,
         adjunctions,
-        distributive
+        distributive,
+        finite-typelits,
+        vector-sized
