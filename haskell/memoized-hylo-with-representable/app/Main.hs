@@ -55,19 +55,19 @@ hyloMemo ::
 hyloMemo f g = index @t h where h = tabulate $ f . fmap (index h) . g
 {-# INLINE hyloMemo #-}
 
-data BinTreeF x
-  = Tip
-  | Branch !x !x
+data FibF x
+  = Base
+  | Rec !x !x
   deriving (Functor)
 
-merge :: Num a => BinTreeF a -> a
-merge Tip = 1
-merge (Branch x y) = x + y
+merge :: Num a => FibF a -> a
+merge Base = 1
+merge (Rec x y) = x + y
 
-split :: (Num a, Eq a) => a -> BinTreeF a
-split 0 = Tip
-split 1 = Tip
-split n = Branch (n - 1) (n - 2)
+split :: (Num a, Eq a) => a -> FibF a
+split 0 = Base
+split 1 = Base
+split n = Rec (n - 1) (n - 2)
 
 fib :: Natural -> Natural
 fib = hylo merge split
