@@ -40,17 +40,18 @@ setField = modifyField @x . const
 
 type FoldFields :: forall {k}. [k] -> Type -> Constraint
 class FoldFields (xs :: [k]) r where
-  foldMapField :: Monoid m => (forall (x :: k) a. Field x r a => Proxy x -> r -> m) -> r -> m
+  foldMapFields :: Monoid m => (forall (x :: k) a. Field x r a => Proxy x -> r -> m) -> r -> m
 
 instance FoldFields '[] r where
-  foldMapField _ = mempty
+  foldMapFields _ = mempty
 
 instance (Field x r a, FoldFields xs r) => FoldFields (x ': xs) r where
-  foldMapField f r = f @x Proxy r <> foldMapField @xs f r
+  foldMapFields f r = f @x Proxy r <> foldMapFields @xs f r
 
+-- restore specified fields in the state after performing m
 restore :: forall {k} (xs :: [k]) s m a. (MonadState s m, FoldFields xs s) => m a -> m a
 restore m = do
-  Endo f <- gets $ foldMapField @xs \(Proxy :: Proxy x) s ->
+  Endo f <- gets $ foldMapFields @xs \(Proxy :: Proxy x) s ->
     Endo $ setField @x (getField @x s)
   a <- m
   modify f
@@ -68,8 +69,8 @@ data Expr
   deriving (Eq, Show)
 
 data Stmt
-  = Let Name Expr
-  | Name := Expr
+  = Name := Expr
+  | Name :<- Expr
   | Print Expr
   | Block [Stmt]
   deriving (Eq, Show)
@@ -101,7 +102,7 @@ addName nm = do
   count <- gets \env -> env.freshCount
   vs NE.:| vss <- gets \env -> env.vars
   let nm' = "v." ++ show count
-  let add (Just _) = throwError $ "variable \'" ++ nm ++ "\' is undefined"
+  let add (Just _) = throwError $ "variable \'" ++ nm ++ "\' is redefined"
       add Nothing = pure $ Just nm'
   vs' <- Map.alterF add nm vs
   modify \env -> env {vars = vs' NE.:| vss, freshCount = count + 1}
@@ -121,12 +122,12 @@ withNewScope m =
     m
 
 renameStmt :: Stmt -> Renamer Stmt
-renameStmt (Let nm expr) = do
-  nm' <- addName nm
-  Let nm' <$> renameExpr expr
 renameStmt (nm := expr) = do
-  nm' <- findName nm
+  nm' <- addName nm
   (nm' :=) <$> renameExpr expr
+renameStmt (nm :<- expr) = do
+  nm' <- findName nm
+  (nm' :<-) <$> renameExpr expr
 renameStmt (Print expr) =
   Print <$> renameExpr expr
 renameStmt (Block stmts) = withNewScope do
@@ -145,12 +146,12 @@ main :: IO ()
 main = do
   let expr =
         Block
-          [ Let "x" $ Int 0,
-            Let "y" $ Int 1,
-            "x" := (Var "x" :+ Var "y"),
+          [ "x" := Int 0,
+            "y" := Int 1,
+            "x" :<- (Var "x" :+ Var "y"),
             Block
-              [ Let "x" $ Int 10,
-                "x" := (Var "x" :* Var "y")
+              [ "x" := Int 10,
+                "x" :<- (Var "x" :* Var "y")
               ],
             Print (Var "x")
           ]
