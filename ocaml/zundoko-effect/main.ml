@@ -15,20 +15,20 @@ end = struct
   let zun () = perform Zun
   let doko () = perform Doko
   let kiyoshi () = perform Kiyoshi
-  let defaultHandler = { retc = (fun x -> x); exnc = raise; effc = (fun _ -> None) }
+  let default_handler = { retc = (fun x -> x); exnc = raise; effc = (fun _ -> None) }
+  let zun_then next k = continue_with k (zun ()) next
+  let doko_then next k = continue_with k (doko ()) next
 
-  let rec zun_then next k = continue_with k (zun ()) next
-  and doko_then next k = continue_with k (doko ()) next
-
-  and doko_kiyoshi_then next k =
+  let doko_kiyoshi_then next k =
     continue_with
       k
       (doko ();
        kiyoshi ())
       next
+  ;;
 
-  and zun0 =
-    { defaultHandler with
+  let rec zun0 =
+    { default_handler with
       effc =
         (fun (type a) (eff : a t) : ((a, _) continuation -> _) option ->
           match eff with
@@ -38,7 +38,7 @@ end = struct
     }
 
   and zun1 =
-    { defaultHandler with
+    { default_handler with
       effc =
         (fun (type a) (eff : a t) : ((a, _) continuation -> _) option ->
           match eff with
@@ -48,7 +48,7 @@ end = struct
     }
 
   and zun2 =
-    { defaultHandler with
+    { default_handler with
       effc =
         (fun (type a) (eff : a t) : ((a, _) continuation -> _) option ->
           match eff with
@@ -58,7 +58,7 @@ end = struct
     }
 
   and zun3 =
-    { defaultHandler with
+    { default_handler with
       effc =
         (fun (type a) (eff : a t) : ((a, _) continuation -> _) option ->
           match eff with
@@ -68,7 +68,7 @@ end = struct
     }
 
   and zun4 =
-    { defaultHandler with
+    { default_handler with
       effc =
         (fun (type a) (eff : a t) : ((a, _) continuation -> _) option ->
           match eff with
@@ -80,7 +80,7 @@ end = struct
 
   let rec printer =
     let printf_continue str k = continue_with k (printf str) printer in
-    { defaultHandler with
+    { default_handler with
       effc =
         (fun (type a) (eff : a t) : ((a, _) continuation -> _) option ->
           match eff with
