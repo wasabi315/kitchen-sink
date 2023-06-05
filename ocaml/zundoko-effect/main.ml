@@ -8,72 +8,66 @@ end = struct
   open Effect
   open Effect.Shallow
 
-  type 'a Effect.t += Zun : unit Effect.t
-  type 'a Effect.t += Doko : unit Effect.t
-  type 'a Effect.t += Kiyoshi : unit Effect.t
+  type 'a t += Zun : unit t | Doko : unit t | Kiyoshi : unit t
 
   let zun () = perform Zun
   let doko () = perform Doko
   let kiyoshi () = perform Kiyoshi
   let default_handler = { retc = (fun x -> x); exnc = raise; effc = (fun _ -> None) }
-  let zun_then next k = continue_with k (zun ()) next
-  let doko_then next k = continue_with k (doko ()) next
+  let ( / ) act next k = continue_with k (act ()) next
 
-  let doko_kiyoshi_then next k =
-    continue_with
-      k
-      (doko ();
-       kiyoshi ())
-      next
+  let ( & ) act1 act2 () =
+    act1 ();
+    act2 ()
   ;;
 
-  let rec zun0 =
+  let rec s0 =
     { default_handler with
       effc =
         (fun (type a) (eff : a t) : ((a, _) continuation -> _) option ->
           match eff with
-          | Zun -> Some (zun_then zun1)
-          | Doko -> Some (doko_then zun0)
+          | Zun -> Some (zun / s1)
+          | Doko -> Some (doko / s0)
           | _ -> None)
     }
 
-  and zun1 =
+  and s1 =
     { default_handler with
       effc =
         (fun (type a) (eff : a t) : ((a, _) continuation -> _) option ->
           match eff with
-          | Zun -> Some (zun_then zun2)
-          | Doko -> Some (doko_then zun0)
+          | Zun -> Some (zun / s2)
+          | Doko -> Some (doko / s0)
           | _ -> None)
     }
 
-  and zun2 =
+  and s2 =
     { default_handler with
       effc =
         (fun (type a) (eff : a t) : ((a, _) continuation -> _) option ->
           match eff with
-          | Zun -> Some (zun_then zun3)
-          | Doko -> Some (doko_then zun0)
+          | Zun -> Some (zun / s3)
+          | Doko -> Some (doko / s0)
           | _ -> None)
     }
 
-  and zun3 =
+  and s3 =
     { default_handler with
       effc =
         (fun (type a) (eff : a t) : ((a, _) continuation -> _) option ->
           match eff with
-          | Zun -> Some (zun_then zun4)
-          | Doko -> Some (doko_then zun0)
+          | Zun -> Some (zun / s4)
+          | Doko -> Some (doko / s0)
           | _ -> None)
     }
 
-  and zun4 =
+  and s4 =
     { default_handler with
       effc =
         (fun (type a) (eff : a t) : ((a, _) continuation -> _) option ->
           match eff with
-          | Zun -> Some (zun_then zun4)
-          | Doko -> Some (doko_kiyoshi_then zun0)
+          | Zun -> Some (zun / s4)
+          | Doko -> Some ((doko & kiyoshi) / s0)
           | _ -> None)
     }
   ;;
@@ -84,14 +78,15 @@ end = struct
       effc =
         (fun (type a) (eff : a t) : ((a, _) continuation -> _) option ->
           match eff with
-          | Zun -> Some (printf_continue "\u{30BA}\u{30F3}\n")
-          | Doko -> Some (printf_continue "\u{30C9}\u{30B3}\n")
-          | Kiyoshi -> Some (printf_continue "\u{30AD}\u{30E8}\u{30B7}\u{FF01}\n")
+          | Zun -> Some (printf_continue "\u{30BA}\u{30F3}\u{266A}\n")
+          | Doko -> Some (printf_continue "\u{30C9}\u{30B3}\u{266A}\n")
+          | Kiyoshi ->
+            Some (printf_continue "\u{30AD}\u{00B7}\u{30E8}\u{00B7}\u{30B7}\u{FF01}\n")
           | _ -> None)
     }
   ;;
 
-  let run f = continue_with (fiber @@ continue_with (fiber f) ()) zun0 printer
+  let run f = continue_with (fiber @@ continue_with (fiber f) ()) s0 printer
 end
 
 open ZunDoko
