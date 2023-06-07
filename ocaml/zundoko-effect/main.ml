@@ -21,72 +21,40 @@ end = struct
     act2 ()
   ;;
 
-  let rec s0 =
-    { default_handler with
-      effc =
-        (fun (type a) (eff : a t) : ((a, _) continuation -> _) option ->
-          match eff with
-          | Zun -> Some (zun / s1)
-          | Doko -> Some (doko / s0)
-          | _ -> None)
-    }
-
-  and s1 =
-    { default_handler with
-      effc =
-        (fun (type a) (eff : a t) : ((a, _) continuation -> _) option ->
-          match eff with
-          | Zun -> Some (zun / s2)
-          | Doko -> Some (doko / s0)
-          | _ -> None)
-    }
-
-  and s2 =
-    { default_handler with
-      effc =
-        (fun (type a) (eff : a t) : ((a, _) continuation -> _) option ->
-          match eff with
-          | Zun -> Some (zun / s3)
-          | Doko -> Some (doko / s0)
-          | _ -> None)
-    }
-
-  and s3 =
-    { default_handler with
-      effc =
-        (fun (type a) (eff : a t) : ((a, _) continuation -> _) option ->
-          match eff with
-          | Zun -> Some (zun / s4)
-          | Doko -> Some (doko / s0)
-          | _ -> None)
-    }
-
-  and s4 =
-    { default_handler with
-      effc =
-        (fun (type a) (eff : a t) : ((a, _) continuation -> _) option ->
-          match eff with
-          | Zun -> Some (zun / s4)
-          | Doko -> Some ((doko & kiyoshi) / s0)
-          | _ -> None)
-    }
+  let with_kiyoshi =
+    let rec state numZun =
+      { default_handler with
+        effc =
+          (fun (type a) (eff : a t) : ((a, _) continuation -> _) option ->
+            match eff, numZun with
+            | Zun, 4 -> Some (zun / state 4)
+            | Zun, _ -> Some (zun / state (numZun + 1))
+            | Doko, 4 -> Some ((doko & kiyoshi) / state 0)
+            | Doko, _ -> Some (doko / state 0)
+            | _ -> None)
+      }
+    in
+    fun f -> continue_with (fiber f) () (state 0)
   ;;
 
-  let rec printer =
-    let printf_continue str k = continue_with k (printf str) printer in
-    { default_handler with
-      effc =
-        (fun (type a) (eff : a t) : ((a, _) continuation -> _) option ->
-          match eff with
-          | Zun -> Some (printf_continue "\u{30BA}\u{30F3}\u{266A}\n")
-          | Doko -> Some (printf_continue "\u{30C9}\u{30B3}\u{266A}\n")
-          | Kiyoshi ->
-            Some (printf_continue "\u{30AD}\u{00B7}\u{30E8}\u{00B7}\u{30B7}\u{FF01}\n")
-          | _ -> None)
-    }
+  let pretty =
+    let rec handler =
+      let printf_continue str k = continue_with k (printf str) handler in
+      { default_handler with
+        effc =
+          (fun (type a) (eff : a t) : ((a, _) continuation -> _) option ->
+            match eff with
+            | Zun -> Some (printf_continue "\u{30BA}\u{30F3}\u{266A}\n")
+            | Doko -> Some (printf_continue "\u{30C9}\u{30B3}\u{266A}\n")
+            | Kiyoshi ->
+              Some (printf_continue "\u{30AD}\u{00B7}\u{30E8}\u{00B7}\u{30B7}\u{FF01}\n")
+            | _ -> None)
+      }
+    in
+    fun f -> continue_with (fiber f) () handler
   ;;
 
-  let run f = continue_with (fiber @@ continue_with (fiber f) ()) s0 printer
+  let run f = pretty @@ fun () -> with_kiyoshi f
 end
 
 open ZunDoko
