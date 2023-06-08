@@ -52,7 +52,7 @@ unfoldSH ::
 unfoldSH f g = unfold \s -> (f s, ObjectF (g s))
 
 fromNat :: Monad m => (forall x. f x -> m x) -> ShallowHandlers f m a a
-fromNat f = unfoldSH (const pure) (const $ fmap (,()) . f) ()
+fromNat f = let x = pure :< ObjectF (fmap (,x) . f) in x
 
 runFreer :: Monad m => ShallowHandlers f m a b -> Freer f a -> m b
 runFreer (retc :< _) (Pure a) = retc a
