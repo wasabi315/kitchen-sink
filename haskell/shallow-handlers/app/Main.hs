@@ -39,11 +39,23 @@ instance Functor g => Recursive (Object f g) where
 instance Functor g => Corecursive (Object f g) where
   embed (ObjectF f) = Object f
 
-fromNat :: Monad m => (forall x. f x -> m x) -> Cofree (ObjectF f m) ()
-fromNat f = coiter (\s -> ObjectF $ fmap (,s) . f) ()
+-- Shallow handler defined with Cofree
 
-runFreer :: Monad m => Cofree (ObjectF f m) () -> Freer f a -> m a
-runFreer (_ :< _) (Pure a) = pure a
+type ShallowHandlers f m a = Cofree (ObjectF f m) (a -> m a)
+
+fromNat :: Monad m => (forall x. f x -> m x) -> ShallowHandlers f m a
+fromNat f = pure <$ coiter (\() -> ObjectF $ fmap (,()) . f) ()
+
+unfoldSH ::
+  Monad m =>
+  (s -> a -> m a) -> -- state -> value handler
+  (forall x. s -> f x -> m (x, s)) -> -- state -> effect handler
+  s ->
+  ShallowHandlers f m a
+unfoldSH f g s = f s :< (unfoldSH f g <$> ObjectF (g s))
+
+runFreer :: Monad m => ShallowHandlers f m a -> Freer f a -> m a
+runFreer (retc :< _) (Pure a) = retc a
 runFreer (_ :< ObjectF f) (Free (Coyoneda k m)) = do
   (b, effcs) <- f m
   runFreer effcs (k b)
@@ -61,10 +73,10 @@ put :: a -> Freer (State a) ()
 put = send . Put
 
 evalState1 :: Freer (State s) a -> s -> a
-evalState1 = \m s -> runIdentity $ runFreer (() <$ coiter h s) m
+evalState1 = \m s -> runIdentity $ runFreer (unfoldSH (const pure) h s) m
   where
-    h :: s -> ObjectF (State s) Identity s
-    h s = ObjectF \case
+    h :: s -> State s a -> Identity (a, s)
+    h s = \case
       Get -> pure (s, s)
       Put s' -> pure ((), s')
 
