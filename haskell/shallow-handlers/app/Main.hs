@@ -39,11 +39,11 @@ instance Functor g => Recursive (Object f g) where
 instance Functor g => Corecursive (Object f g) where
   embed (ObjectF f) = Object f
 
-fromNat :: Monad m => (forall x. f x -> m x) -> Cofree (ObjectF f m) (a -> m a)
-fromNat f = pure <$ coiter (\s -> ObjectF $ fmap (,s) . f) ()
+fromNat :: Monad m => (forall x. f x -> m x) -> Cofree (ObjectF f m) ()
+fromNat f = coiter (\s -> ObjectF $ fmap (,s) . f) ()
 
-runFreer :: Monad m => Cofree (ObjectF f m) (a -> m a) -> Freer f a -> m a
-runFreer (retc :< _) (Pure a) = retc a
+runFreer :: Monad m => Cofree (ObjectF f m) () -> Freer f a -> m a
+runFreer (_ :< _) (Pure a) = pure a
 runFreer (_ :< ObjectF f) (Free (Coyoneda k m)) = do
   (b, effcs) <- f m
   runFreer effcs (k b)
@@ -61,7 +61,7 @@ put :: a -> Freer (State a) ()
 put = send . Put
 
 evalState1 :: Freer (State s) a -> s -> a
-evalState1 = \m s -> runIdentity $ runFreer (pure <$ coiter h s) m
+evalState1 = \m s -> runIdentity $ runFreer (() <$ coiter h s) m
   where
     h :: s -> ObjectF (State s) Identity s
     h s = ObjectF \case
