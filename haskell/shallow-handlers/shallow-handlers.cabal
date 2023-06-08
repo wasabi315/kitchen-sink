@@ -24,4 +24,7 @@ executable shallow-handlers
         base ^>=4.16.4.0,
         free,
         profunctors,
-        kan-extensions
+        kan-extensions,
+        objective,
+        recursion-schemes,
+        mtl

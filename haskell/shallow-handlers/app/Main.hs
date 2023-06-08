@@ -2,17 +2,22 @@
 {-# LANGUAGE DeriveTraversable #-}
 {-# LANGUAGE DerivingStrategies #-}
 {-# LANGUAGE GADTs #-}
+{-# LANGUAGE ImportQualifiedPost #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE RankNTypes #-}
-{-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE ScopedTypeVariables #-}
-{-# LANGUAGE TypeOperators #-}
+{-# LANGUAGE TupleSections #-}
+{-# LANGUAGE TypeFamilies #-}
+{-# OPTIONS_GHC -Wno-orphans #-}
 
 import Control.Comonad.Cofree
+import Control.Exception
 import Control.Monad.Free
-import Data.Bifunctor
+import Control.Monad.State qualified as Mtl
+import Control.Object
 import Data.Functor.Coyoneda
-import Data.Profunctor
+import Data.Functor.Foldable
+import Data.Functor.Identity
 
 -- Freer
 
@@ -21,33 +26,27 @@ type Freer f = Free (Coyoneda f)
 send :: f a -> Freer f a
 send = liftF . liftCoyoneda
 
--- Pairing
+-- The base functor of Object
 
-type f `Pairing` g = forall a b c. (a -> b -> c) -> f a -> g b -> c
-
-infix 4 `Pairing`
-
-zap :: f `Pairing` g -> f (x -> y) -> g x -> y
-zap pairing = pairing ($)
-
-sym :: f `Pairing` g -> g `Pairing` f
-sym pairing f m n = pairing (flip f) n m
-
-freeCofree :: f `Pairing` g -> Free f `Pairing` Cofree g
-freeCofree _ f (Pure a) (b :< _) = f a b
-freeCofree pairing f (Free m) (_ :< w) = pairing (freeCofree pairing f) m w
-
--- What is this??
-newtype Wtf f a = Wtf (forall x. f x -> (x, a))
+newtype ObjectF f g a = ObjectF (forall x. f x -> g (x, a))
   deriving stock (Functor)
 
-coyonedaWtf :: Coyoneda f `Pairing` Wtf f
-coyonedaWtf f (Coyoneda k m) (Wtf g) = uncurry f . first k $ g m
+type instance Base (Object f g) = ObjectF f g
 
-type Cofreer f = Cofree (Wtf f)
+instance Functor g => Recursive (Object f g) where
+  project (Object f) = ObjectF f
 
-freerCofreer :: Freer f `Pairing` Cofreer f
-freerCofreer = freeCofree coyonedaWtf
+instance Functor g => Corecursive (Object f g) where
+  embed (ObjectF f) = Object f
+
+fromNat :: Monad m => (forall x. f x -> m x) -> Cofree (ObjectF f m) (a -> m a)
+fromNat f = pure <$ coiter (\s -> ObjectF $ fmap (,s) . f) ()
+
+runFreer :: Monad m => Cofree (ObjectF f m) (a -> m a) -> Freer f a -> m a
+runFreer (retc :< _) (Pure a) = retc a
+runFreer (_ :< ObjectF f) (Free (Coyoneda k m)) = do
+  (b, effcs) <- f m
+  runFreer effcs (k b)
 
 -- State
 
@@ -61,13 +60,21 @@ get = send Get
 put :: a -> Freer (State a) ()
 put = send . Put
 
-handleState :: s -> Wtf (State s) s
-handleState s = Wtf \case
-  Get -> (s, s)
-  Put s' -> ((), s')
+evalState1 :: Freer (State s) a -> s -> a
+evalState1 = \m s -> runIdentity $ runFreer (pure <$ coiter h s) m
+  where
+    h :: s -> ObjectF (State s) Identity s
+    h s = ObjectF \case
+      Get -> pure (s, s)
+      Put s' -> pure ((), s')
 
-evalState :: Freer (State s) a -> s -> a
-evalState m s = zap (sym freerCofreer) (id <$ coiter handleState s) m
+evalState2 :: Freer (State s) a -> s -> a
+evalState2 = Mtl.evalState . runFreer (fromNat h)
+  where
+    h :: State s a -> Mtl.State s a
+    h = \case
+      Get -> Mtl.get
+      Put s' -> Mtl.put s'
 
 test :: Freer (State Int) [Int]
 test = do
@@ -80,41 +87,4 @@ test = do
   pure [a, b, c, d]
 
 main :: IO ()
-main = print $ evalState test 0
-
--- Is below true?
--- Deep Handler - Church encoding
--- Shallow Handler - Scott encoding
-
--- Shallow Handler
-
-data ShallowHandler f a r = ShallowHandler
-  { retc :: a -> r,
-    effc :: forall x. f x -> (x -> Freer f a) -> r
-  }
-  deriving stock (Functor)
-
-instance Profunctor (ShallowHandler f) where
-  dimap f g ShallowHandler {..} =
-    ShallowHandler
-      { retc = g . retc . f,
-        effc = \m k -> g $ effc m (fmap f . k)
-      }
-
-continueWith :: (c -> Freer f a) -> c -> ShallowHandler f a b -> b
-continueWith k c ShallowHandler {..} =
-  case k c of
-    Pure a -> retc a
-    Free (Coyoneda k' m) -> effc m k'
-
-startWith :: Freer f a -> ShallowHandler f a b -> b
-startWith m = continueWith (const m) ()
-
-monadic :: Monad m => (forall x. f x -> m x) -> ShallowHandler f a (m a)
-monadic f = h
-  where
-    h =
-      ShallowHandler
-        { retc = pure,
-          effc = \eff k -> f eff >>= \x -> continueWith k x h
-        }
+main = assert (evalState1 test 0 == evalState2 test 0) pure ()
