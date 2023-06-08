@@ -1,0 +1,27 @@
+cabal-version:      3.0
+name:               shallow-handlers
+version:            0.1.0.0
+license:            BSD-3-Clause
+license-file:       LICENSE
+author:             wasabi315
+maintainer:         wasabi.nvim.st@gmail.com
+
+common defaults
+    default-language: Haskell2010
+    ghc-options:
+        -Wall
+        -Wcompat
+        -Wincomplete-record-updates
+        -Wincomplete-uni-patterns
+        -Wredundant-constraints
+        -O2
+
+executable shallow-handlers
+    import: defaults
+    hs-source-dirs: app
+    main-is: Main.hs
+    build-depends:
+        base ^>=4.16.4.0,
+        free,
+        profunctors,
+        kan-extensions
