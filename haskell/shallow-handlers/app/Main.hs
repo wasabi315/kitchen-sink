@@ -12,11 +12,11 @@
 
 import Control.Comonad.Cofree
 import Control.Exception
-import Control.Monad.Free
+import Control.Monad.Free hiding (unfold)
 import Control.Monad.State qualified as Mtl
 import Control.Object
 import Data.Functor.Coyoneda
-import Data.Functor.Foldable
+import Data.Functor.Foldable hiding (unfold)
 import Data.Functor.Identity
 
 -- Freer
@@ -41,20 +41,20 @@ instance Functor g => Corecursive (Object f g) where
 
 -- Shallow handler defined with Cofree
 
-type ShallowHandlers f m a = Cofree (ObjectF f m) (a -> m a)
-
-fromNat :: Monad m => (forall x. f x -> m x) -> ShallowHandlers f m a
-fromNat f = pure <$ coiter (\() -> ObjectF $ fmap (,()) . f) ()
+type ShallowHandlers f m a b = Cofree (ObjectF f m) (a -> m b)
 
 unfoldSH ::
   Monad m =>
-  (s -> a -> m a) -> -- state -> value handler
-  (forall x. s -> f x -> m (x, s)) -> -- state -> effect handler
+  (s -> a -> m b) -> -- state -> value handler
+  (forall x. s -> f x -> m (x, s)) -> -- state -> (effect handler x state)
   s ->
-  ShallowHandlers f m a
-unfoldSH f g s = f s :< (unfoldSH f g <$> ObjectF (g s))
+  ShallowHandlers f m a b
+unfoldSH f g = unfold \s -> (f s, ObjectF (g s))
 
-runFreer :: Monad m => ShallowHandlers f m a -> Freer f a -> m a
+fromNat :: Monad m => (forall x. f x -> m x) -> ShallowHandlers f m a a
+fromNat f = unfoldSH (const pure) (const $ fmap (,()) . f) ()
+
+runFreer :: Monad m => ShallowHandlers f m a b -> Freer f a -> m b
 runFreer (retc :< _) (Pure a) = retc a
 runFreer (_ :< ObjectF f) (Free (Coyoneda k m)) = do
   (b, effcs) <- f m
