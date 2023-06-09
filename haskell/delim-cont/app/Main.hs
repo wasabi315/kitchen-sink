@@ -50,16 +50,16 @@ control0 (PromptTag tag) f =
 
 type f % r = PromptTag (Free (Co f) r)
 
-type Continuation c f a = Mom c -> Mom (Free (Co f) a)
+type Continuation c f a = c -> Mom (Free (Co f) a)
 
 data Co f a where
-  Co :: f x -> (Mom x -> Mom a) -> Co f a
+  Co :: f x -> (x -> Mom a) -> Co f a
 
 perform :: f % r -> f a -> Mom a
-perform tag eff = control0 tag (pure . Free . Co eff)
+perform tag eff = control0 tag \k -> pure . Free $ Co eff (k . pure)
 
 fiber :: (a -> Mom b) -> Continuation a f b
-fiber f x = x >>= fmap Pure . f
+fiber f x = Pure <$> f x
 
 data Handler f a b = Handler
   { retc :: a -> Mom b,
@@ -68,7 +68,7 @@ data Handler f a b = Handler
 
 continueWith :: f % a -> Continuation c f a -> c -> Handler f a b -> Mom b
 continueWith tag k c Handler {..} = do
-  next <- prompt tag $ k (pure c)
+  next <- prompt tag (k c)
   case next of
     Pure a -> retc a
     Free (Co eff k') -> effc eff k'
