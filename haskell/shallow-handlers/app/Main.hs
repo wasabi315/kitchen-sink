@@ -69,11 +69,11 @@ unfoldSH ::
   SH f m a b
 unfoldSH f g = unfold \s -> (f s, ObjectF (g s))
 
-deep :: Monad m => (a -> m b) -> (forall x. f x -> m x) -> SH f m a b
-deep retc effc = sh where sh = SH {retc, effc = \m k -> effc m >>= flip k sh}
+deep :: (a -> m b) -> (forall x r. f x -> (x -> m r) -> m r) -> SH f m a b
+deep retc effc = sh where sh = SH {retc, effc = \m k -> effc m (flip k sh)}
 
 fromNat :: Monad m => (forall x. f x -> m x) -> SH f m a a
-fromNat = deep pure
+fromNat f = deep pure \x -> (f x >>=)
 
 runFreer :: Monad m => SH f m a b -> Freer f a -> m b
 runFreer SH {retc} (Pure a) = retc a
@@ -117,8 +117,8 @@ testState = do
         pure [a, b, c, d]
       res1 = evalState1 m 0
       res2 = evalState2 m 0
-  assertIO (res1 == res2)
-  assertIO (res1 == [0, 0, 100, 0])
+  assertIO $ res1 == res2
+  assertIO $ res1 == [0, 0, 100, 0]
 
 -- CoinFlip
 
