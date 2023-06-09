@@ -76,17 +76,15 @@ evalState1 :: Freer (State s) a -> s -> a
 evalState1 = \m s -> runIdentity $ runFreer (unfoldSH (const pure) h s) m
   where
     h :: s -> State s a -> Identity (a, s)
-    h s = \case
-      Get -> pure (s, s)
-      Put s' -> pure ((), s')
+    h s Get = pure (s, s)
+    h _ (Put s) = pure ((), s)
 
 evalState2 :: Freer (State s) a -> s -> a
 evalState2 = Mtl.evalState . runFreer (fromNat h)
   where
     h :: State s a -> Mtl.State s a
-    h = \case
-      Get -> Mtl.get
-      Put s' -> Mtl.put s'
+    h Get = Mtl.get
+    h (Put s) = Mtl.put s
 
 test :: Freer (State Int) [Int]
 test = do
