@@ -69,8 +69,11 @@ unfoldSH ::
   SH f m a b
 unfoldSH f g = unfold \s -> (f s, ObjectF (g s))
 
+deep :: Monad m => (a -> m b) -> (forall x. f x -> m x) -> SH f m a b
+deep retc effc = sh where sh = SH {retc, effc = fmap (,sh) . effc}
+
 fromNat :: Monad m => (forall x. f x -> m x) -> SH f m a a
-fromNat f = let x = SH {retc = pure, effc = fmap (,x) . f} in x
+fromNat = deep pure
 
 runFreer :: Monad m => SH f m a b -> Freer f a -> m b
 runFreer SH {retc} (Pure a) = retc a
