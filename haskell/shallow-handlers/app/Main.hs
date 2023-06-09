@@ -1,3 +1,4 @@
+{-# LANGUAGE NamedFieldPuns #-}
 {-# LANGUAGE BlockArguments #-}
 {-# LANGUAGE DeriveTraversable #-}
 {-# LANGUAGE DerivingStrategies #-}
@@ -7,6 +8,7 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TupleSections #-}
 {-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE PatternSynonyms #-}
 {-# OPTIONS_GHC -Wno-orphans #-}
 
 import Control.Comonad.Cofree
@@ -19,9 +21,17 @@ import Data.Functor.Coyoneda
 import Data.Functor.Foldable hiding (unfold)
 import Data.Functor.Identity
 
+assertIO :: Bool -> IO ()
+assertIO b = assert b pure ()
+
 -- Freer
 
 type Freer f = Free (Coyoneda f)
+
+pattern Bind :: f b -> (b -> Freer f a) -> Freer f a
+pattern Bind m k = Free (Coyoneda k m)
+
+{-# COMPLETE Pure, Bind #-}
 
 send :: f a -> Freer f a
 send = liftF . liftCoyoneda
@@ -41,24 +51,32 @@ instance Functor g => Corecursive (Object f g) where
 
 -- Shallow handler defined with Cofree
 
-type ShallowHandlers f m a b = Cofree (ObjectF f m) (a -> m b)
+type SH f m a b = Cofree (ObjectF f m) (a -> m b)
+
+pattern SH ::
+  (a -> m b) ->
+  (forall x. f x -> m (x, SH f m a b)) ->
+  SH f m a b
+pattern SH {retc, effc} = retc :< ObjectF effc
+
+{-# COMPLETE SH #-}
 
 unfoldSH ::
   Monad m =>
   (s -> a -> m b) -> -- state -> value handler
   (forall x. s -> f x -> m (x, s)) -> -- state -> (effect handler x state)
   s ->
-  ShallowHandlers f m a b
+  SH f m a b
 unfoldSH f g = unfold \s -> (f s, ObjectF (g s))
 
-fromNat :: Monad m => (forall x. f x -> m x) -> ShallowHandlers f m a a
-fromNat f = let x = pure :< ObjectF (fmap (,x) . f) in x
+fromNat :: Monad m => (forall x. f x -> m x) -> SH f m a a
+fromNat f = let x = SH {retc = pure, effc = fmap (,x) . f} in x
 
-runFreer :: Monad m => ShallowHandlers f m a b -> Freer f a -> m b
-runFreer (retc :< _) (Pure a) = retc a
-runFreer (_ :< ObjectF f) (Free (Coyoneda k m)) = do
-  (b, effcs) <- f m
-  runFreer effcs (k b)
+runFreer :: Monad m => SH f m a b -> Freer f a -> m b
+runFreer SH {retc} (Pure a) = retc a
+runFreer SH {effc} (Bind m k) = do
+  (b, sh) <- effc m
+  runFreer sh (k b)
 
 -- State
 
@@ -86,15 +104,20 @@ evalState2 = Mtl.evalState . runFreer (fromNat h)
     h Get = Mtl.get
     h (Put s) = Mtl.put s
 
-test :: Freer (State Int) [Int]
-test = do
-  a <- get
-  b <- get
-  put 100
-  c <- get
-  put b
-  d <- get
-  pure [a, b, c, d]
+testState :: IO ()
+testState = do
+  let m = do
+        a <- get
+        b <- get
+        put (100 :: Int)
+        c <- get
+        put b
+        d <- get
+        pure [a, b, c, d]
+      res1 = evalState1 m 0
+      res2 = evalState2 m 0
+  assertIO (res1 == res2)
+  assertIO (res1 == [0, 0, 100, 0])
 
 -- CoinFlip
 
@@ -107,14 +130,17 @@ coinFlip = send CoinFlip
 alternating :: Freer CoinFlip a -> a
 alternating = runIdentity . runFreer t
   where
-    t, f :: ShallowHandlers CoinFlip Identity a a
-    t = pure :< ObjectF \CoinFlip -> pure (True, f)
-    f = pure :< ObjectF \CoinFlip -> pure (False, t)
+    t, f :: SH CoinFlip Identity a a
+    t = SH {retc = pure, effc = \CoinFlip -> pure (True, f)}
+    f = SH {retc = pure, effc = \CoinFlip -> pure (False, t)}
 
-test2 :: [Bool]
-test2 = alternating $ replicateM 10 coinFlip
+testCoinFlip :: IO ()
+testCoinFlip = do
+  let m = alternating $ replicateM 10 coinFlip
+      n = take 10 $ cycle [True, False]
+  assertIO $ m == n
 
 main :: IO ()
 main = do
-  assert (evalState1 test 0 == evalState2 test 0) pure ()
-  assert (test2 == take 10 (cycle [True, False])) pure ()
+  testState
+  testCoinFlip
