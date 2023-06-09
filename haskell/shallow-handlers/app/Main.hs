@@ -3,7 +3,6 @@
 {-# LANGUAGE DerivingStrategies #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE ImportQualifiedPost #-}
-{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TupleSections #-}
@@ -12,6 +11,7 @@
 
 import Control.Comonad.Cofree
 import Control.Exception
+import Control.Monad
 import Control.Monad.Free hiding (unfold)
 import Control.Monad.State qualified as Mtl
 import Control.Object
@@ -96,5 +96,25 @@ test = do
   d <- get
   pure [a, b, c, d]
 
+-- CoinFlip
+
+data CoinFlip a where
+  CoinFlip :: CoinFlip Bool
+
+coinFlip :: Freer CoinFlip Bool
+coinFlip = send CoinFlip
+
+alternating :: Freer CoinFlip a -> a
+alternating = runIdentity . runFreer t
+  where
+    t, f :: ShallowHandlers CoinFlip Identity a a
+    t = pure :< ObjectF \CoinFlip -> pure (True, f)
+    f = pure :< ObjectF \CoinFlip -> pure (False, t)
+
+test2 :: [Bool]
+test2 = alternating $ replicateM 10 coinFlip
+
 main :: IO ()
-main = assert (evalState1 test 0 == evalState2 test 0) pure ()
+main = do
+  assert (evalState1 test 0 == evalState2 test 0) pure ()
+  assert (test2 == take 10 (cycle [True, False])) pure ()
