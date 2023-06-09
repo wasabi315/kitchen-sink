@@ -55,16 +55,20 @@ instance Monad g => Corecursive (Object f g) where
 type SH f m a b = Cofree (ObjectF f m) (a -> m b)
 
 pattern SH ::
-  (a -> m b) ->
-  (forall x r. f x -> (x -> SH f m a b -> m r) -> m r) ->
+  (a -> m b) -> -- value handler
+  ( forall x r. -- effect handler
+    f x ->
+    (x -> SH f m a b -> m r) -> -- continuation takes a value and a handler to be used next time
+    m r
+  ) ->
   SH f m a b
 pattern SH {retc, effc} = retc :< ObjectF effc
 
 {-# COMPLETE SH #-}
 
 unfoldSH ::
-  (s -> a -> m b) -> -- state -> value handler
-  (forall x r. s -> f x -> (x -> s -> m r) -> m r) -> -- state -> (effect handler x state)
+  (s -> (a -> m b)) -> -- state -> value handler
+  (s -> (forall x r. f x -> (x -> s -> m r) -> m r)) -> -- state -> effect handler
   s ->
   SH f m a b
 unfoldSH f g = unfold \s -> (f s, ObjectF (g s))
