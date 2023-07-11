@@ -6,6 +6,9 @@ import Data.Foldable
 
 -- Emulate Koka's with syntax
 
+with :: a -> a
+with = id
+
 (>>=) :: ((a -> b) -> c) -> (a -> b) -> c
 (>>=) = ($)
 
@@ -19,10 +22,10 @@ main :: IO ()
 main = Main.do
   -- desugared to:
   --   twice $
-  --     for_ [False, True] $ \n ->
-  --       for_ [False, True] $ \m ->
-  --         print (n, m)
-  twice
-  n <- for_ [False, True]
-  m <- for_ [False, True]
-  print (n, m)
+  --     for_ [False, True] $ \p ->
+  --       for_ [False, True] $ \q ->
+  --         print (p, q)
+  with twice
+  p <- with for_ [False, True]
+  q <- with for_ [False, True]
+  print (p, q)
