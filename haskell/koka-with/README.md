@@ -5,6 +5,7 @@
 
 module Main where
 
+import Control.Exception
 import Data.Foldable
 
 with :: a -> a
@@ -22,10 +23,12 @@ twice m = m *> m
 main :: IO ()
 main = Main.do
   -- desugared to:
-  --   twice $
-  --     for_ [False, True] $ \p ->
-  --       for_ [False, True] $ \q ->
-  --         print (p, q)
+  --   (`finally` putStrLn "Bye!") $
+  --     twice $
+  --       for_ [False, True] $ \p ->
+  --         for_ [False, True] $ \q ->
+  --           print (p, q)
+  with (`finally` putStrLn "Bye!")
   with twice
   p <- with for_ [False, True]
   q <- with for_ [False, True]
