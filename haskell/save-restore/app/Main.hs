@@ -5,17 +5,15 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE FunctionalDependencies #-}
-{-# LANGUAGE GADTs #-}
 {-# LANGUAGE ImportQualifiedPost #-}
 {-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE PolyKinds #-}
-{-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE StandaloneKindSignatures #-}
 {-# LANGUAGE TypeApplications #-}
+{-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE UndecidableInstances #-}
-{-# LANGUAGE NoFieldSelectors #-}
 
 import Control.Applicative
 import Control.Monad.Except
@@ -24,8 +22,6 @@ import Data.Kind
 import Data.List.NonEmpty qualified as NE
 import Data.Map.Strict qualified as M
 import Data.Map.Strict qualified as Map
-import Data.Monoid
-import Data.Proxy
 import GHC.Records
 
 type Field :: forall {k}. k -> Type -> Type -> Constraint
@@ -38,21 +34,20 @@ class SetField x r a | x r -> a where
 setField :: forall x r a. SetField x r a => a -> r -> r
 setField = modifyField @x . const
 
-type FoldFields :: forall {k}. [k] -> Type -> Constraint
-class FoldFields (xs :: [k]) r where
-  foldMapFields :: Monoid m => (forall (x :: k) a. Field x r a => Proxy x -> r -> m) -> r -> m
+type RestoreFields :: forall {k}. [k] -> Type -> Constraint
+class RestoreFields (xs :: [k]) r where
+  getRestorer :: r -> (r -> r)
 
-instance FoldFields '[] r where
-  foldMapFields _ = mempty
+instance RestoreFields '[] r where
+  getRestorer _ = id
 
-instance (Field x r a, FoldFields xs r) => FoldFields (x ': xs) r where
-  foldMapFields f r = f @x Proxy r <> foldMapFields @xs f r
+instance (Field x r a, RestoreFields xs r) => RestoreFields (x ': xs) r where
+  getRestorer r = setField @x (getField @x r) . getRestorer @xs r
 
 -- restore specified fields in the state after performing m
-restore :: forall {k} (xs :: [k]) s m a. (MonadState s m, FoldFields xs s) => m a -> m a
+restore :: forall {k} (xs :: [k]) s m a. (MonadState s m, RestoreFields xs s) => m a -> m a
 restore m = do
-  Endo f <- gets $ foldMapFields @xs \(Proxy :: Proxy x) s ->
-    Endo $ setField @x (getField @x s)
+  f <- gets $ getRestorer @xs
   a <- m
   modify f
   pure a
