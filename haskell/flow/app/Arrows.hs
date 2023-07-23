@@ -93,7 +93,10 @@ feedMealy (Mealy f) (a : as) = let (b, m) = f a in b : feedMealy m as
 data Cmd = Add Int | Sub Int
 
 ex2 :: Mealy Cmd Int
-ex2 = flow \cmd -> uncurry (-) ^$$ ((accumAdd $$ cmd) :|: (accumSub $$ cmd))
+ex2 = flow \cmd ->
+  let acc1 = accumAdd $$ cmd
+      acc2 = accumSub $$ cmd
+   in (-) <$> acc1 <*> acc2
   where
     accumAdd, accumSub :: Mealy Cmd Int
     accumAdd = unfoldMealy 0 \s -> \case
