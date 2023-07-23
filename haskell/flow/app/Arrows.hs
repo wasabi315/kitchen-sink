@@ -1,21 +1,19 @@
 {-# LANGUAGE BlockArguments #-}
-{-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE LambdaCase #-}
-{-# LANGUAGE QualifiedDo #-}
-{-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE StandaloneDeriving #-}
 {-# LANGUAGE TupleSections #-}
 
 module Arrows where
 
+import Cartesian
 import Control.Arrow
 import Control.Category
 import Data.Bool
 import Data.Function (fix)
 import Port
 import Text.Show.Functions ()
-import Prelude hiding (id, (.), (>>))
+import Prelude hiding (fst, id, snd, (.))
 
 -- Diagram
 
@@ -39,7 +37,6 @@ instance Cartesian Flow where
   fst = Fst
   snd = Snd
   dup = Dup
-  f &&& g = Seq Dup (Par f g)
   void = Void
 
 instance Arrow Flow where
@@ -66,22 +63,14 @@ instance Category Mealy where
         (c, f') = f b
      in (c, f' . g')
 
-instance Cartesian Mealy where
-  fst = arr Prelude.fst
-  snd = arr Prelude.snd
-  dup = arr \x -> (x, x)
-  Mealy f &&& Mealy g = Mealy \a ->
-    let (b, f') = f a
-        (c, g') = g a
-     in ((b, c), f' Port.&&& g')
-  void = arr (const ())
-
 instance Arrow Mealy where
   arr f = m where m = Mealy ((,m) . f)
   Mealy f *** Mealy g = Mealy \(a, c) ->
     let (b, f') = f a
         (d, g') = g c
      in ((b, d), f' *** g')
+
+instance Cartesian Mealy
 
 unfoldMealy :: s -> (s -> a -> (b, s)) -> Mealy a b
 unfoldMealy s t = Mealy (fmap (`unfoldMealy` t) . t s)
@@ -93,24 +82,20 @@ feedMealy (Mealy f) (a : as) = let (b, m) = f a in b : feedMealy m as
 data Cmd = Add Int | Sub Int
 
 ex2 :: Mealy Cmd Int
-ex2 = flow \cmd ->
-  let acc1 = accumAdd $$ cmd
-      acc2 = accumSub $$ cmd
-   in (-) <$> acc1 <*> acc2
+ex2 = flow \cmd -> (-) <$> (accumAdd $$ cmd) <*> (accumSub $$ cmd)
   where
-    accumAdd, accumSub :: Mealy Cmd Int
-    accumAdd = unfoldMealy 0 \s -> \case
-      Add d -> let s' = s + d in (s', s')
-      Sub _ -> (s, s)
-    accumSub = unfoldMealy 0 \s -> \case
-      Sub d -> let s' = s + d in (s', s')
-      Add _ -> (s, s)
+    accumAdd = unfoldMealy 0 \s ->
+      dup . \case
+        Add d -> s + d
+        Sub _ -> s
+    accumSub = unfoldMealy 0 \s ->
+      dup . \case
+        Sub d -> s + d
+        Add _ -> s
 
 -- Naive Arrowised-FRP
 
 type Time = Int
-
-type DTime = Int
 
 type Signal a = Time -> a
 
@@ -120,16 +105,11 @@ instance Category SF where
   id = SF id
   SF f . SF g = SF (f . g)
 
-instance Cartesian SF where
-  fst = arr Prelude.fst
-  snd = arr Prelude.snd
-  dup = arr \x -> (x, x)
-  SF f &&& SF g = SF \s -> (,) <$> f s <*> g s
-  void = constant ()
-
 instance Arrow SF where
   arr f = SF (f .)
-  SF f *** SF g = SF \s -> (,) <$> f (Port.fst . s) <*> g (Port.snd . s)
+  SF f *** SF g = SF \s -> (,) <$> f (fst . s) <*> g (snd . s)
+
+instance Cartesian SF
 
 constant :: b -> SF a b
 constant = arr . const
@@ -147,9 +127,8 @@ reactimate (SF f) input = f (input !!) <$> [0 .. length input - 1]
 fanController :: SF Float Bool
 fanController =
   flow \tmp ->
-    let th = bool 30.0 25.0 <$> fan'
-        fan = (>=) <$> tmp <*> th
-        fan' = iPre False $$ fan
+    let fan = (>=) <$> tmp <*> th
+        th = bool 30.0 25.0 <$> (iPre False $$ fan)
      in fan
 
 fanController' :: SF (Float, Float) Bool
@@ -157,8 +136,7 @@ fanController' =
   flow \(tmp :|: hmd) ->
     let di = calcDi <$> tmp <*> hmd
         fan = (>=) <$> di <*> th
-        fan' = iPre False $$ fan
-        th = bool 76.0 74.0 <$> fan'
+        th = bool 76.0 74.0 <$> (iPre False $$ fan)
      in fan
   where
     calcDi tmp hmd = 0.81 * tmp + 0.01 * hmd * (0.99 * tmp - 14.3) + 46.3

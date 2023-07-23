@@ -25,5 +25,6 @@ executable flow
     other-modules:
         Port
         Arrows
+        Cartesian
     build-depends:
         base ^>=4.16.4.0

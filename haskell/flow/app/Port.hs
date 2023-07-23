@@ -6,35 +6,19 @@ module Port
   ( Port,
     encode,
     ($$),
-    (^$$),
     flow,
     proj1,
     proj2,
     pattern (:|:),
     discard,
-    (>>),
-    Cartesian (..),
+    (Port.>>),
   )
 where
 
-import Control.Arrow (Arrow (arr, (&&&)))
+import Cartesian
+import Control.Arrow
 import Control.Category (Category (..))
-import Text.Show.Functions ()
-import Prelude hiding (id, (.), (>>))
-
-class Category k => Cartesian k where
-  fst :: k (a, b) a
-  snd :: k (a, b) b
-  dup :: k a (a, a)
-  (&&&) :: k a b -> k a c -> k a (b, c)
-  void :: k a ()
-
-instance Cartesian (->) where
-  fst = Prelude.fst
-  snd = Prelude.snd
-  dup x = (x, x)
-  f &&& g = \x -> (f x, g x)
-  void = const ()
+import Prelude hiding (fst, id, snd, (.))
 
 newtype Port k r a = Port {unPort :: k r a}
 
@@ -50,23 +34,20 @@ encode, ($$) :: Category k => k a b -> (Port k r a -> Port k r b)
 encode f (Port x) = Port (f . x)
 ($$) = encode
 
-(^$$) :: Arrow k => (a -> b) -> (Port k r a -> Port k r b)
-f ^$$ p = arr f $$ p
-
-infix 1 $$, ^$$
+infix 1 $$
 
 flow, decode :: Category k => (forall r. Port k r a -> Port k r b) -> k a b
 flow = decode
 decode f = unPort (f (Port id))
 
 pair :: Cartesian k => Port k r a -> Port k r b -> Port k r (a, b)
-pair (Port x) (Port y) = Port (x Port.&&& y)
+pair (Port x) (Port y) = Port (x &&&& y)
 
 proj1 :: Cartesian k => Port k r (a, b) -> Port k r a
-proj1 = encode Port.fst
+proj1 = encode fst
 
 proj2 :: Cartesian k => Port k r (a, b) -> Port k r b
-proj2 = encode Port.snd
+proj2 = encode snd
 
 split :: Cartesian k => Port k r (a, b) -> (Port k r a, Port k r b)
 split p = (proj1 p, proj2 p)
