@@ -50,7 +50,7 @@ box :: (a -> b) -> Port Flow r a -> Port Flow r b
 box f = encode (Embed f)
 
 ex1 :: Flow (a, b) (b, a)
-ex1 = flow \(x :|: y) -> y :|: x
+ex1 = flow \(Tup x y) -> Tup y x
 
 -- Mealy
 
@@ -133,7 +133,7 @@ fanController =
 
 fanController' :: SF (Float, Float) Bool
 fanController' =
-  flow \(tmp :|: hmd) ->
+  flow \(Tup tmp hmd) ->
     let di = calcDi <$> tmp <*> hmd
         fan = (>=) <$> di <*> th
         th = bool 76.0 74.0 <$> (iPre False $$ fan)

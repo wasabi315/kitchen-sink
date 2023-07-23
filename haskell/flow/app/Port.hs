@@ -9,26 +9,26 @@ module Port
     flow,
     proj1,
     proj2,
-    pattern (:|:),
+    pattern Tup,
     discard,
     (Port.>>),
   )
 where
 
 import Cartesian
+import Control.Applicative
 import Control.Arrow
-import Control.Category (Category (..))
+import Control.Category
 import Prelude hiding (fst, id, snd, (.))
 
 newtype Port k r a = Port {unPort :: k r a}
 
--- Lawful?
 instance Arrow k => Functor (Port k r) where
   fmap f (Port x) = Port (arr f . x)
 
 instance Arrow k => Applicative (Port k r) where
-  pure = Port . arr . const
-  Port f <*> Port x = Port (arr (uncurry ($)) . (f Control.Arrow.&&& x))
+  pure x = Port (arr (const x))
+  Port f <*> Port x = Port (arr (uncurry ($)) . (f &&& x))
 
 encode, ($$) :: Category k => k a b -> (Port k r a -> Port k r b)
 encode f (Port x) = Port (f . x)
@@ -52,12 +52,12 @@ proj2 = encode snd
 split :: Cartesian k => Port k r (a, b) -> (Port k r a, Port k r b)
 split p = (proj1 p, proj2 p)
 
-pattern (:|:) :: Cartesian k => Port k r a -> Port k r b -> Port k r (a, b)
-pattern x :|: y <- (split -> (x, y))
+pattern Tup :: Cartesian k => Port k r a -> Port k r b -> Port k r (a, b)
+pattern Tup x y <- (split -> (x, y))
   where
-    x :|: y = pair x y
+    Tup x y = pair x y
 
-{-# COMPLETE (:|:) #-}
+{-# COMPLETE Tup #-}
 
 discard :: Cartesian k => Port k r a -> Port k r ()
 discard = encode void
