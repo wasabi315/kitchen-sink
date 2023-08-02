@@ -1,5 +1,5 @@
 cabal-version:      3.0
-name:               pairing
+name:               freer-pairing
 version:            0.1.0.0
 license:            BSD-3-Clause
 license-file:       LICENSE
@@ -22,10 +22,7 @@ executable main
     main-is: Main.hs
     build-depends:
         base ^>=4.16.4.0,
-        free,
-        profunctors,
         kan-extensions,
+        free,
         objective,
-        recursion-schemes,
-        comonad,
-        mtl
+        recursion-schemes
