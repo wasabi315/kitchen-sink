@@ -112,6 +112,4 @@ z2ToText (StoreT (Identity (Compose css)) _) =
     & TL.toStrict
 
 typogram :: T.Text -> T.Text
-typogram txt
-  | T.null txt = txt
-  | otherwise = textToZ2 txt T.empty (z2ToText . convert)
+typogram txt = textToZ2 txt T.empty (z2ToText . convert)
