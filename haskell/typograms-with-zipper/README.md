@@ -48,23 +48,17 @@ $ cabal run < typograms/mocks.txt
 
 ```haskell
 -- Zipper on 2D vector
-newtype Z2 n m a = Z2 (Store (V.Vector n `Compose` V.Vector m) a)
+type Z2 n m a = Store (V.Vector n `Compose` V.Vector m) a
 
 -- 3x3 window
 data Window = W
-  { ul :: Char,
-    u :: Char,
-    ur :: Char,
-    l :: Char,
-    c :: Char,
-    r :: Char,
-    dl :: Char,
-    d :: Char,
-    dr :: Char
+  { ul, u, ur :: Char,
+    l, c, r :: Char,
+    dl, d, dr :: Char
   }
 
 currWindow :: (KnownNat n, KnownNat m) => Z2 n m Char -> Window
-currWindow (Z2 zz) =
+currWindow zz =
   W
     { ul = ix (decr, decr) zz,
       u = ix (decr, pure) zz,

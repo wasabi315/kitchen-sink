@@ -1,5 +1,3 @@
-{-# LANGUAGE DerivingStrategies #-}
-{-# LANGUAGE GeneralisedNewtypeDeriving #-}
 {-# LANGUAGE ImportQualifiedPost #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE PartialTypeSignatures #-}
@@ -14,7 +12,6 @@ import Control.Comonad
 import Control.Comonad.Representable.Store
 import Control.Monad
 import Data.Bitraversable
-import Data.Finite qualified as F
 import Data.Function
 import Data.Functor.Compose
 import Data.Functor.Identity
@@ -32,29 +29,17 @@ main :: IO ()
 main = T.getContents >>= T.putStrLn . typogram
 
 -- Zipper on 2D vector
-newtype Z2 n m a = Z2 (Store (V.Vector n `Compose` V.Vector m) a)
-  deriving newtype (Functor)
-
-instance (KnownNat n, KnownNat m) => Comonad (Z2 n m) where
-  extract (Z2 w) = extract w
-  duplicate (Z2 w) = Z2 $ extend Z2 w
-  extend f (Z2 w) = Z2 $ extend (f . Z2) w
+type Z2 n m a = Store (V.Vector n `Compose` V.Vector m) a
 
 -- 3x3 window
 data Window = W
-  { ul :: Char,
-    u :: Char,
-    ur :: Char,
-    l :: Char,
-    c :: Char,
-    r :: Char,
-    dl :: Char,
-    d :: Char,
-    dr :: Char
+  { ul, u, ur :: Char,
+    l, c, r :: Char,
+    dl, d, dr :: Char
   }
 
 currWindow :: (KnownNat n, KnownNat m) => Z2 n m Char -> Window
-currWindow (Z2 zz) =
+currWindow zz =
   W
     { ul = ix (decr, decr) zz,
       u = ix (decr, pure) zz,
@@ -108,7 +93,7 @@ textToZ2 t r k
     w <- maximum $ map T.length ts,
     Just (SomeNat (_ :: Proxy h)) <- someNatVal (fromIntegral h),
     Just (SomeNat (_ :: Proxy w)) <- someNatVal (fromIntegral w) =
-      k . Z2 @h @w . flip store minBound $ \(E i, E j) ->
+      k @h @w . flip store minBound $ \(E i, E j) ->
         let row = ts !! i
          in if j >= T.length row then ' ' else T.index row j
   | otherwise = error "impossible"
@@ -117,7 +102,7 @@ pattern E :: Enum a => Int -> a
 pattern E n <- (fromEnum -> n) where E n = toEnum n
 
 z2ToText :: (KnownNat h, KnownNat w) => Z2 h w Char -> T.Text
-z2ToText (Z2 (StoreT (Identity (Compose css)) _)) =
+z2ToText (StoreT (Identity (Compose css)) _) =
   css
     & fmap (foldMap TB.singleton)
     & V.toList

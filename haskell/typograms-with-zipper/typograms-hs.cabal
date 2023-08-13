@@ -28,5 +28,4 @@ executable typograms
         comonad,
         adjunctions,
         text,
-        finite-typelits,
         vector-sized
