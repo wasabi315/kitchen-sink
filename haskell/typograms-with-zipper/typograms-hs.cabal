@@ -1,0 +1,32 @@
+cabal-version:      2.4
+name:               typograms-with-zipper
+version:            0.1.0.0
+synopsis:
+
+-- A longer description of the package.
+-- description:
+homepage:
+
+-- A URL where users can report bugs.
+-- bug-reports:
+license:            MIT
+license-file:       LICENSE
+author:             wasabi315
+maintainer:         wasabi.nvim.st@gmail.com
+
+-- A copyright notice.
+-- copyright:
+category:           Graphics
+extra-source-files: CHANGELOG.md
+
+executable typograms
+    hs-source-dirs: app
+    main-is: Main.hs
+    default-language: Haskell2010
+    build-depends:
+        base ^>=4.16.4.0,
+        comonad,
+        adjunctions,
+        text,
+        finite-typelits,
+        vector-sized
