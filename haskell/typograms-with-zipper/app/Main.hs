@@ -12,7 +12,7 @@ import Data.Bitraversable
 import Data.Function
 import Data.Functor.Compose
 import Data.Functor.Identity
-import Data.List (intersperse, (!!))
+import Data.List ((!!))
 import Data.Maybe
 import Data.Proxy
 import Data.Text qualified as T
