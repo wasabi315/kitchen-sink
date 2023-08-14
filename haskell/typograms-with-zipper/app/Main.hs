@@ -23,7 +23,7 @@ import Data.Vector.Sized qualified as V
 import GHC.TypeLits
 
 main :: IO ()
-main = T.getContents >>= T.putStrLn . typogram
+main = T.getContents >>= T.putStr . typogram
 
 -- Zipper on 2D vector
 type Z2 n m a = Store (V.Vector n `Compose` V.Vector m) a
@@ -98,10 +98,7 @@ textToZ2 t r k
 z2ToText :: (KnownNat h, KnownNat w) => Z2 h w Char -> T.Text
 z2ToText (StoreT (Identity (Compose css)) _) =
   css
-    & fmap (foldMap TB.singleton)
-    & V.toList
-    & intersperse (TB.singleton '\n')
-    & mconcat
+    & foldMap ((<> TB.singleton '\n') . foldMap TB.singleton)
     & TB.toLazyText
     & TL.toStrict
 
