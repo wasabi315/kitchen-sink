@@ -1,7 +1,6 @@
 {-# LANGUAGE ImportQualifiedPost #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE PartialTypeSignatures #-}
-{-# LANGUAGE PatternSynonyms #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications #-}
@@ -89,17 +88,14 @@ textToZ2 :: T.Text -> r -> (forall h w. (KnownNat h, KnownNat w) => Z2 h w Char 
 textToZ2 t r k
   | T.null t = r
   | ts <- T.lines t,
-    h <- length ts,
-    w <- maximum $ map T.length ts,
-    Just (SomeNat (_ :: Proxy h)) <- someNatVal (fromIntegral h),
-    Just (SomeNat (_ :: Proxy w)) <- someNatVal (fromIntegral w) =
-      k @h @w . flip store minBound $ \(E i, E j) ->
-        let row = ts !! i
-         in if j >= T.length row then ' ' else T.index row j
-  | otherwise = error "impossible"
-
-pattern E :: Enum a => Int -> a
-pattern E n <- (fromEnum -> n) where E n = toEnum n
+    h <- fromIntegral $ length ts,
+    w <- fromIntegral $ maximum $ map T.length ts,
+    Just (SomeNat (_ :: Proxy h)) <- someNatVal h,
+    Just (SomeNat (_ :: Proxy w)) <- someNatVal w =
+      k @h @w . flip store minBound $ \(fromEnum -> i, fromEnum -> j) ->
+        charAt (ts !! i) j
+  where
+    charAt t i = if i >= T.length t then ' ' else T.index t i
 
 z2ToText :: (KnownNat h, KnownNat w) => Z2 h w Char -> T.Text
 z2ToText (StoreT (Identity (Compose css)) _) =
