@@ -4,7 +4,6 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE TypeOperators #-}
-{-# LANGUAGE ViewPatterns #-}
 
 import Control.Comonad
 import Control.Comonad.Representable.Store
@@ -91,8 +90,8 @@ textToZ2 t r k
     w <- fromIntegral $ maximum $ map T.length ts,
     Just (SomeNat (_ :: Proxy h)) <- someNatVal h,
     Just (SomeNat (_ :: Proxy w)) <- someNatVal w =
-      k @h @w $ flip store minBound $ \(fromEnum -> i, fromEnum -> j) ->
-        charAt (ts !! i) j
+      k @h @w $ flip store minBound $ \(i, j) ->
+        charAt (ts !! fromEnum i) (fromEnum j)
   where
     charAt t i = if i >= T.length t then ' ' else T.index t i
 
