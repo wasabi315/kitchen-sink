@@ -92,7 +92,7 @@ textToZ2 t r k
     w <- fromIntegral $ maximum $ map T.length ts,
     Just (SomeNat (_ :: Proxy h)) <- someNatVal h,
     Just (SomeNat (_ :: Proxy w)) <- someNatVal w =
-      k @h @w . flip store minBound $ \(fromEnum -> i, fromEnum -> j) ->
+      k @h @w $ flip store minBound $ \(fromEnum -> i, fromEnum -> j) ->
         charAt (ts !! i) j
   where
     charAt t i = if i >= T.length t then ' ' else T.index t i
