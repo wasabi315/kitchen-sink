@@ -2,116 +2,188 @@ open Format
 
 module C_printer : sig
   val output : formatter -> (unit -> unit) -> unit
-  val fn : ('a, formatter, unit, (unit -> unit) -> unit) format4 -> 'a
-  val ( ! ) : ('a, formatter, unit) format -> 'a
-  val ifel : ('a, formatter, unit, (unit -> unit) -> (unit -> unit) -> unit) format4 -> 'a
+  val func : ('a, formatter, unit, (unit -> unit) -> unit) format4 -> 'a
+  val stmt : ('a, formatter, unit) format -> 'a
+  val return : ('a, formatter, unit) format -> 'a
+  val if' : ('a, formatter, unit, (unit -> unit) -> unit) format4 -> 'a
+  val else' : (unit -> unit) -> unit
 end = struct
   let proto_ctx, func_ctx = 0, 1
-  let q = Array.init 2 (fun _ -> Queue.create ())
+  let printer_qs = Array.init 2 (fun _ -> Queue.create ())
 
   let output ppf f =
-    Array.iter Queue.clear q;
+    Array.iter Queue.clear printer_qs;
     f ();
-    fprintf ppf "@[<v>#include <stdio.h>";
-    Array.iter (Queue.iter (( |> ) ppf)) q;
+    fprintf ppf "@[<v>";
+    Array.iter (Queue.iter (( |> ) ppf)) printer_qs;
     fprintf ppf "@]@."
   ;;
 
-  let print_to ctx = kdprintf (fun p -> Queue.add p q.(ctx))
+  let print_to ctx = kdprintf (fun p -> Queue.add p printer_qs.(ctx))
 
-  let fn fmt =
+  let make_block ctx =
+    kdprintf (fun p f ->
+      print_to ctx "@,@[<v 4>%t{" p;
+      f ();
+      print_to ctx "@]@,}")
+  ;;
+
+  let func fmt =
     kdprintf
       (fun p f ->
         print_to proto_ctx "@,%t;" p;
-        print_to func_ctx "@,@[<v 4>%t {" p;
-        f ();
-        print_to func_ctx "@]@,}")
+        make_block func_ctx "%t " p f)
       fmt
   ;;
 
-  let ( ! ) fmt = kdprintf (print_to func_ctx "@,%t;") fmt
-
-  let ifel fmt =
-    kdprintf
-      (fun p t e ->
-        print_to func_ctx "@,@[<v 4>if (%t) {" p;
-        t ();
-        print_to func_ctx "@]@,@[<v 4>} else {";
-        e ();
-        print_to func_ctx "@]@,}")
-      fmt
-  ;;
+  let stmt fmt = kdprintf (print_to func_ctx "@,%t;") fmt
+  let if' fmt = kdprintf (make_block func_ctx "if (%t) ") fmt
+  let else' f = make_block func_ctx "else " f
+  let return fmt = kdprintf (stmt "return %t") fmt
 end
 
+let _test1 =
+  let open C_printer in
+  output str_formatter (fun () ->
+    func "int main(void)" (fun () ->
+      stmt {|printf("%%d\n", even(10))|};
+      return "0");
+    func "int even(int n)" (fun () ->
+      if' "n == 0" (fun () -> return "1");
+      else' (fun () -> return "odd(n - 1)"));
+    func "int odd(int n)" (fun () ->
+      if' "n == 0" (fun () -> return "0");
+      else' (fun () -> return "even(n - 1)")));
+  let expected =
+    {|
+int main(void);
+int even(int n);
+int odd(int n);
+int main(void) {
+    printf("%d\n", even(10));
+    return 0;
+}
+int even(int n) {
+    if (n == 0) {
+        return 1;
+    }
+    else {
+        return odd(n - 1);
+    }
+}
+int odd(int n) {
+    if (n == 0) {
+        return 0;
+    }
+    else {
+        return even(n - 1);
+    }
+}
+|}
+  in
+  let actual = flush_str_formatter () in
+  assert (String.equal expected actual)
+;;
+
 module Toy_lang = struct
-  type program =
-    { main : string
-    ; main_arg : int
-    ; fns : (string * string * expr) list
+  type program = { funcs : func list }
+
+  and func =
+    { name : string
+    ; param : string
+    ; body : expr
     }
 
   and expr =
     | Int of int
     | Var of string
     | Add of expr * expr
-    | Sub of expr * expr
-    | IsZero of expr
     | Call of string * expr
-    | If of expr * expr * expr
+    | IfZero of expr * expr * expr
 end
 
-module Codegen = struct
-  let gen_var =
-    let count = ref 0 in
-    fun () ->
-      count := !count + 1;
-      sprintf "v%d" !count
-  ;;
-
+module Codegen : sig
+  val gen : formatter -> Toy_lang.program -> unit
+end = struct
   open C_printer
 
-  let gen_body =
-    let rec gen_expr = function
-      | Toy_lang.Int n -> dprintf "%d" n
-      | Var v -> dprintf "%s" v
-      | Add (l, r) -> dprintf "(%t + %t)" (gen_expr l) (gen_expr r)
-      | Sub (l, r) -> dprintf "(%t - %t)" (gen_expr l) (gen_expr r)
-      | IsZero e -> dprintf "(%t == 0)" (gen_expr e)
-      | Call (f, e) -> dprintf "%s(%t)" f (gen_expr e)
-      | If (c, t, e) ->
-        let v = gen_var () in
-        !"int %s" v;
-        (ifel "%t" (gen_expr c))
-          (fun () -> !"%s = %t" v (gen_expr t))
-          (fun () -> !"%s = %t" v (gen_expr e));
-        dprintf "%s" v
-    in
-    fun expr -> !"return %t" (gen_expr expr)
+  let tmp_count = ref 0
+
+  let create_tmp () =
+    incr tmp_count;
+    asprintf "tmp%d" !tmp_count
   ;;
 
-  let gen_fn (fn_name, param_name, body) =
-    fn "int %s(int %s)" fn_name param_name (fun () -> gen_body body)
+  let dpf = dprintf
+
+  let rec gen_expr = function
+    | Toy_lang.Int n -> dpf "%d" n
+    | Var v -> dpf "%s" v
+    | Add (l, r) -> dpf "(%t + %t)" (gen_expr l) (gen_expr r)
+    | Call (f, e) -> dpf "%s(%t)" f (gen_expr e)
+    | IfZero (c, t, e) ->
+      let tmp = create_tmp () in
+      stmt "int %s" tmp;
+      if' "%t == 0" (gen_expr c) (fun () -> stmt "%s = %t" tmp (gen_expr t));
+      else' (fun () -> stmt "%s = %t" tmp (gen_expr e));
+      dpf "%s" tmp
   ;;
 
-  let gen_program prog =
-    fn "int main(void)" (fun () ->
-      !"printf(\"%%d\\n\", %s(%d))" prog.Toy_lang.main prog.main_arg;
-      !"return 0");
-    List.iter gen_fn prog.fns
+  let gen_func { Toy_lang.name; param; body } =
+    func "int %s(int %s)" name param (fun () -> return "%t" (gen_expr body))
   ;;
 
-  let f ppf prog = output ppf (fun () -> gen_program prog)
+  let gen_program prog = List.iter gen_func prog.Toy_lang.funcs
+
+  let gen ppf prog =
+    tmp_count := 0;
+    output ppf (fun () -> gen_program prog)
+  ;;
 end
 
-let () =
+let _test2 =
   let program =
-    { Toy_lang.main = "even"
-    ; main_arg = 100
-    ; fns =
-        [ "even", "n", If (IsZero (Var "n"), Int 1, Call ("odd", Sub (Var "n", Int 1)))
-        ; "odd", "n", If (IsZero (Var "n"), Int 0, Call ("even", Sub (Var "n", Int 1)))
+    { Toy_lang.funcs =
+        [ { name = "even"
+          ; param = "n"
+          ; body = IfZero (Var "n", Int 1, Call ("odd", Add (Var "n", Int (-1))))
+          }
+        ; { name = "odd"
+          ; param = "n"
+          ; body = IfZero (Var "n", Int 0, Call ("even", Add (Var "n", Int (-1))))
+          }
         ]
     }
   in
-  Codegen.f std_formatter program
+  let expected =
+    {|
+int even(int n);
+int odd(int n);
+int even(int n) {
+    int tmp1;
+    if (n == 0) {
+        tmp1 = 1;
+    }
+    else {
+        tmp1 = odd((n + -1));
+    }
+    return tmp1;
+}
+int odd(int n) {
+    int tmp2;
+    if (n == 0) {
+        tmp2 = 0;
+    }
+    else {
+        tmp2 = even((n + -1));
+    }
+    return tmp2;
+}
+|}
+  in
+  Codegen.gen str_formatter program;
+  let actual = flush_str_formatter () in
+  assert (String.equal expected actual)
 ;;
+
+let () = printf "OK!@."
