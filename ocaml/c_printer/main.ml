@@ -23,7 +23,7 @@ end = struct
 
   let make_block ctx =
     kdprintf (fun p f ->
-      print_to ctx "@,@[<v 4>%t{" p;
+      print_to ctx "@,@[<v 2>%t{" p;
       f ();
       print_to ctx "@]@,}")
   ;;
@@ -60,24 +60,24 @@ int main(void);
 int even(int n);
 int odd(int n);
 int main(void) {
-    printf("%d\n", even(10));
-    return 0;
+  printf("%d\n", even(10));
+  return 0;
 }
 int even(int n) {
-    if (n == 0) {
-        return 1;
-    }
-    else {
-        return odd(n - 1);
-    }
+  if (n == 0) {
+    return 1;
+  }
+  else {
+    return odd(n - 1);
+  }
 }
 int odd(int n) {
-    if (n == 0) {
-        return 0;
-    }
-    else {
-        return even(n - 1);
-    }
+  if (n == 0) {
+    return 0;
+  }
+  else {
+    return even(n - 1);
+  }
 }
 |}
   in
@@ -160,24 +160,62 @@ let _test2 =
 int even(int n);
 int odd(int n);
 int even(int n) {
-    int tmp1;
-    if (n == 0) {
-        tmp1 = 1;
-    }
-    else {
-        tmp1 = odd((n + -1));
-    }
-    return tmp1;
+  int tmp1;
+  if (n == 0) {
+    tmp1 = 1;
+  }
+  else {
+    tmp1 = odd((n + -1));
+  }
+  return tmp1;
 }
 int odd(int n) {
+  int tmp2;
+  if (n == 0) {
+    tmp2 = 0;
+  }
+  else {
+    tmp2 = even((n + -1));
+  }
+  return tmp2;
+}
+|}
+  in
+  Codegen.gen str_formatter program;
+  let actual = flush_str_formatter () in
+  assert (String.equal expected actual)
+;;
+
+let _test3 =
+  let program =
+    { Toy_lang.funcs =
+        [ { name = "id"
+          ; param = "n"
+          ; body =
+              IfZero (Var "n", Int 0, IfZero (Add (Var "n", Int (-1)), Int 1, Var "n"))
+          }
+        ]
+    }
+  in
+  let expected =
+    {|
+int id(int n);
+int id(int n) {
+  int tmp1;
+  if (n == 0) {
+    tmp1 = 0;
+  }
+  else {
     int tmp2;
-    if (n == 0) {
-        tmp2 = 0;
+    if ((n + -1) == 0) {
+      tmp2 = 1;
     }
     else {
-        tmp2 = even((n + -1));
+      tmp2 = n;
     }
-    return tmp2;
+    tmp1 = tmp2;
+  }
+  return tmp1;
 }
 |}
   in
