@@ -1,6 +1,6 @@
-open Format
-
 module C_printer : sig
+  open Format
+
   val output : formatter -> (unit -> unit) -> unit
   val func : ('a, formatter, unit, (unit -> unit) -> unit) format4 -> 'a
   val stmt : ('a, formatter, unit) format -> 'a
@@ -8,6 +8,8 @@ module C_printer : sig
   val if' : ('a, formatter, unit, (unit -> unit) -> unit) format4 -> 'a
   val else' : (unit -> unit) -> unit
 end = struct
+  open Format
+
   let proto_ctx, func_ctx = 0, 1
   let printer_qs = Array.init 2 (fun _ -> Queue.create ())
 
@@ -42,9 +44,9 @@ end = struct
   let return fmt = kdprintf (stmt "return %t") fmt
 end
 
-let _test1 =
+let _test =
   let open C_printer in
-  output str_formatter (fun () ->
+  output Format.str_formatter (fun () ->
     func "int main(void)" (fun () ->
       stmt {|printf("%%d\n", even(10))|};
       return "0");
@@ -81,147 +83,156 @@ int odd(int n) {
 }
 |}
   in
-  let actual = flush_str_formatter () in
+  let actual = Format.flush_str_formatter () in
   assert (String.equal expected actual)
 ;;
 
-module Toy_lang = struct
+(* Example *)
+
+module Tiny_c = struct
   type program = { funcs : func list }
 
   and func =
     { name : string
     ; param : string
-    ; body : expr
+    ; body : stmt list
     }
+
+  and stmt =
+    | Return of expr
+    | IfZero of expr * stmt list * stmt list
 
   and expr =
     | Int of int
     | Var of string
     | Add of expr * expr
     | Call of string * expr
-    | IfZero of expr * expr * expr
-end
 
-module Codegen : sig
-  val gen : formatter -> Toy_lang.program -> unit
-end = struct
-  open C_printer
-
-  let tmp_count = ref 0
-
-  let create_tmp () =
-    incr tmp_count;
-    asprintf "tmp%d" !tmp_count
-  ;;
-
-  let dpf = dprintf
-
-  let rec gen_expr = function
-    | Toy_lang.Int n -> dpf "%d" n
-    | Var v -> dpf "%s" v
-    | Add (l, r) -> dpf "(%t + %t)" (gen_expr l) (gen_expr r)
-    | Call (f, e) -> dpf "%s(%t)" f (gen_expr e)
-    | IfZero (c, t, e) ->
-      let tmp = create_tmp () in
-      stmt "int %s" tmp;
-      if' "%t == 0" (gen_expr c) (fun () -> stmt "%s = %t" tmp (gen_expr t));
-      else' (fun () -> stmt "%s = %t" tmp (gen_expr e));
-      dpf "%s" tmp
-  ;;
-
-  let gen_func { Toy_lang.name; param; body } =
-    func "int %s(int %s)" name param (fun () -> return "%t" (gen_expr body))
-  ;;
-
-  let gen_program prog = List.iter gen_func prog.Toy_lang.funcs
-
-  let gen ppf prog =
-    tmp_count := 0;
-    output ppf (fun () -> gen_program prog)
-  ;;
-end
-
-let _test2 =
-  let program =
-    { Toy_lang.funcs =
+  let even_odd =
+    { funcs =
         [ { name = "even"
           ; param = "n"
-          ; body = IfZero (Var "n", Int 1, Call ("odd", Add (Var "n", Int (-1))))
+          ; body =
+              [ IfZero
+                  ( Var "n"
+                  , [ Return (Int 1) ]
+                  , [ Return (Call ("odd", Add (Var "n", Int (-1)))) ] )
+              ]
           }
         ; { name = "odd"
           ; param = "n"
-          ; body = IfZero (Var "n", Int 0, Call ("even", Add (Var "n", Int (-1))))
-          }
-        ]
-    }
-  in
-  let expected =
-    {|
-int even(int n);
-int odd(int n);
-int even(int n) {
-  int tmp1;
-  if (n == 0) {
-    tmp1 = 1;
-  }
-  else {
-    tmp1 = odd((n + -1));
-  }
-  return tmp1;
-}
-int odd(int n) {
-  int tmp2;
-  if (n == 0) {
-    tmp2 = 0;
-  }
-  else {
-    tmp2 = even((n + -1));
-  }
-  return tmp2;
-}
-|}
-  in
-  Codegen.gen str_formatter program;
-  let actual = flush_str_formatter () in
-  assert (String.equal expected actual)
-;;
-
-let _test3 =
-  let program =
-    { Toy_lang.funcs =
-        [ { name = "id"
-          ; param = "n"
           ; body =
-              IfZero (Var "n", Int 0, IfZero (Add (Var "n", Int (-1)), Int 1, Var "n"))
+              [ IfZero
+                  ( Var "n"
+                  , [ Return (Int 0) ]
+                  , [ Return (Call ("even", Add (Var "n", Int (-1)))) ] )
+              ]
           }
         ]
     }
-  in
-  let expected =
-    {|
-int id(int n);
-int id(int n) {
-  int tmp1;
-  if (n == 0) {
-    tmp1 = 0;
-  }
-  else {
-    int tmp2;
-    if ((n + -1) == 0) {
-      tmp2 = 1;
-    }
-    else {
-      tmp2 = n;
-    }
-    tmp1 = tmp2;
-  }
-  return tmp1;
-}
-|}
-  in
-  Codegen.gen str_formatter program;
-  let actual = flush_str_formatter () in
-  assert (String.equal expected actual)
-;;
+  ;;
+end
 
-let () = printf "OK!@."
+module Codegen_printf = struct
+  open Tiny_c
+  open Printf
+
+  let rec pp_expr oc = function
+    | Int n -> fprintf oc "%d" n
+    | Var v -> fprintf oc "%s" v
+    | Add (e1, e2) -> fprintf oc "%a + %a" pp_expr e1 pp_expr e2
+    | Call (f, e) -> fprintf oc "%s(%a)" f pp_expr e
+  ;;
+
+  let print_indent oc indent = fprintf oc "%s" (String.make indent ' ')
+
+  let rec gen_stmt oc indent stmt =
+    fprintf oc "\n%a" print_indent indent;
+    match stmt with
+    | Return e -> fprintf oc "return %a;" pp_expr e
+    | IfZero (e, s1, s2) ->
+      fprintf oc "if (%a == 0) {" pp_expr e;
+      List.iter (gen_stmt oc (indent + 2)) s1;
+      fprintf oc "\n%a}" print_indent indent;
+      fprintf oc "\n%aelse {" print_indent indent;
+      List.iter (gen_stmt oc (indent + 2)) s2;
+      fprintf oc "\n%a}" print_indent indent
+  ;;
+
+  let gen_proto oc { name; param; _ } = fprintf oc "\nint %s(int %s);" name param
+
+  let gen_func oc { name; param; body } =
+    fprintf oc "\nint %s(int %s) {" name param;
+    List.iter (gen_stmt oc 2) body;
+    fprintf oc "\n}"
+  ;;
+
+  let gen oc { funcs } =
+    List.iter (gen_proto oc) funcs;
+    List.iter (gen_func oc) funcs;
+    printf "\n"
+  ;;
+end
+
+module Codegen_format = struct
+  open Tiny_c
+  open Format
+
+  let rec pp_expr ppf = function
+    | Int n -> fprintf ppf "%d" n
+    | Var v -> fprintf ppf "%s" v
+    | Add (e1, e2) -> fprintf ppf "%a + %a" pp_expr e1 pp_expr e2
+    | Call (f, e) -> fprintf ppf "%s(%a)" f pp_expr e
+  ;;
+
+  let rec gen_stmt ppf stmt =
+    match stmt with
+    | Return e -> fprintf ppf "@,return %a;" pp_expr e
+    | IfZero (e, s1, s2) ->
+      fprintf ppf "@,@[<v 2>if (%a == 0) {" pp_expr e;
+      List.iter (gen_stmt ppf) s1;
+      fprintf ppf "@]@,}@,@[<v 2>else {";
+      List.iter (gen_stmt ppf) s2;
+      fprintf ppf "@]@,}"
+  ;;
+
+  let gen_proto ppf { name; param; _ } = fprintf ppf "@,int %s(int %s);" name param
+
+  let gen_func ppf { name; param; body } =
+    fprintf ppf "@,@[<v 2>int %s(int %s) {" name param;
+    List.iter (gen_stmt ppf) body;
+    fprintf ppf "@]@,}"
+  ;;
+
+  let gen ppf { funcs } =
+    fprintf ppf "@[<v>";
+    List.iter (gen_proto ppf) funcs;
+    List.iter (gen_func ppf) funcs;
+    fprintf ppf "@]@."
+  ;;
+end
+
+module Codegen_c_printer = struct
+  open Tiny_c
+  open C_printer
+
+  let pp_expr = Codegen_format.pp_expr
+
+  let rec gen_stmt = function
+    | Return e -> return "%a" pp_expr e
+    | IfZero (e, s1, s2) ->
+      if' "%a == 0" pp_expr e (fun () -> List.iter gen_stmt s1);
+      else' (fun () -> List.iter gen_stmt s2)
+  ;;
+
+  let gen_func { name; param; body } =
+    func "int %s(int %s)" name param (fun () -> List.iter gen_stmt body)
+  ;;
+
+  let gen_program { funcs } = List.iter gen_func funcs
+  let gen ppf program = output ppf (fun () -> gen_program program)
+end
+
+let () = Codegen_printf.gen stdout Tiny_c.even_odd
+let () = Codegen_format.gen Format.std_formatter Tiny_c.even_odd
+let () = Codegen_c_printer.gen Format.std_formatter Tiny_c.even_odd
