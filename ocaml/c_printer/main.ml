@@ -21,7 +21,7 @@ end = struct
     fprintf ppf "@]@."
   ;;
 
-  let print_to ctx = kdprintf (fun p -> Queue.add p printer_bufs.(ctx))
+  let print_to ctx fmt = kdprintf (fun p -> Queue.add p printer_bufs.(ctx)) fmt
 
   let make_block ctx =
     kdprintf (fun p f ->
