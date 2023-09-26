@@ -11,17 +11,17 @@ end = struct
   open Format
 
   let proto_ctx, func_ctx = 0, 1
-  let printer_qs = Array.init 2 (fun _ -> Queue.create ())
+  let printer_bufs = Array.init 2 (fun _ -> Queue.create ())
 
   let output ppf f =
-    Array.iter Queue.clear printer_qs;
+    Array.iter Queue.clear printer_bufs;
     f ();
     fprintf ppf "@[<v>";
-    Array.iter (Queue.iter (( |> ) ppf)) printer_qs;
+    Array.iter (Queue.iter (( |> ) ppf)) printer_bufs;
     fprintf ppf "@]@."
   ;;
 
-  let print_to ctx = kdprintf (fun p -> Queue.add p printer_qs.(ctx))
+  let print_to ctx = kdprintf (fun p -> Queue.add p printer_bufs.(ctx))
 
   let make_block ctx =
     kdprintf (fun p f ->
@@ -144,32 +144,32 @@ module Codegen_printf = struct
     | Call (f, e) -> fprintf oc "%s(%a)" f pp_expr e
   ;;
 
-  let print_indent oc indent = fprintf oc "%s" (String.make indent ' ')
+  let spaces_of indent = String.make indent ' '
 
-  let rec gen_stmt oc indent stmt =
-    fprintf oc "\n%a" print_indent indent;
+  let rec pp_stmt indent oc stmt =
+    fprintf oc "\n%s" (spaces_of indent);
     match stmt with
     | Return e -> fprintf oc "return %a;" pp_expr e
     | IfZero (e, s1, s2) ->
       fprintf oc "if (%a == 0) {" pp_expr e;
-      List.iter (gen_stmt oc (indent + 2)) s1;
-      fprintf oc "\n%a}" print_indent indent;
-      fprintf oc "\n%aelse {" print_indent indent;
-      List.iter (gen_stmt oc (indent + 2)) s2;
-      fprintf oc "\n%a}" print_indent indent
+      List.iter (pp_stmt (indent + 2) oc) s1;
+      fprintf oc "\n%s}" (spaces_of indent);
+      fprintf oc "\n%selse {" (spaces_of indent);
+      List.iter (pp_stmt (indent + 2) oc) s2;
+      fprintf oc "\n%s}" (spaces_of indent)
   ;;
 
-  let gen_proto oc { name; param; _ } = fprintf oc "\nint %s(int %s);" name param
+  let pp_proto oc { name; param; _ } = fprintf oc "\nint %s(int %s);" name param
 
-  let gen_func oc { name; param; body } =
+  let pp_func oc { name; param; body } =
     fprintf oc "\nint %s(int %s) {" name param;
-    List.iter (gen_stmt oc 2) body;
+    List.iter (pp_stmt 2 oc) body;
     fprintf oc "\n}"
   ;;
 
   let gen oc { funcs } =
-    List.iter (gen_proto oc) funcs;
-    List.iter (gen_func oc) funcs;
+    List.iter (pp_proto oc) funcs;
+    List.iter (pp_func oc) funcs;
     printf "\n"
   ;;
 end
@@ -185,29 +185,28 @@ module Codegen_format = struct
     | Call (f, e) -> fprintf ppf "%s(%a)" f pp_expr e
   ;;
 
-  let rec gen_stmt ppf stmt =
-    match stmt with
+  let rec pp_stmt ppf = function
     | Return e -> fprintf ppf "@,return %a;" pp_expr e
     | IfZero (e, s1, s2) ->
       fprintf ppf "@,@[<v 2>if (%a == 0) {" pp_expr e;
-      List.iter (gen_stmt ppf) s1;
+      List.iter (pp_stmt ppf) s1;
       fprintf ppf "@]@,}@,@[<v 2>else {";
-      List.iter (gen_stmt ppf) s2;
+      List.iter (pp_stmt ppf) s2;
       fprintf ppf "@]@,}"
   ;;
 
-  let gen_proto ppf { name; param; _ } = fprintf ppf "@,int %s(int %s);" name param
+  let pp_proto ppf { name; param; _ } = fprintf ppf "@,int %s(int %s);" name param
 
-  let gen_func ppf { name; param; body } =
+  let pp_func ppf { name; param; body } =
     fprintf ppf "@,@[<v 2>int %s(int %s) {" name param;
-    List.iter (gen_stmt ppf) body;
+    List.iter (pp_stmt ppf) body;
     fprintf ppf "@]@,}"
   ;;
 
   let gen ppf { funcs } =
     fprintf ppf "@[<v>";
-    List.iter (gen_proto ppf) funcs;
-    List.iter (gen_func ppf) funcs;
+    List.iter (pp_proto ppf) funcs;
+    List.iter (pp_func ppf) funcs;
     fprintf ppf "@]@."
   ;;
 end
@@ -229,8 +228,7 @@ module Codegen_c_printer = struct
     func "int %s(int %s)" name param (fun () -> List.iter gen_stmt body)
   ;;
 
-  let gen_program { funcs } = List.iter gen_func funcs
-  let gen ppf program = output ppf (fun () -> gen_program program)
+  let gen ppf { funcs } = output ppf (fun () -> List.iter gen_func funcs)
 end
 
 let () = Codegen_printf.gen stdout Tiny_c.even_odd
