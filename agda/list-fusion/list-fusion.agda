@@ -4,8 +4,8 @@ open import Level
 open import Function using ( _∘_; const )
 open import Data.Bool using ( Bool; true; false; if_then_else_; _∧_ )
 open import Data.List using ( List; _∷_; []; foldl; foldr; map; scanl; scanr )
-open import Data.Product using ( _×_; _,_; uncurry; proj₁; proj₂ )
-open import Relation.Binary.PropositionalEquality using ( _≡_; refl; sym )
+open import Data.Product using ( _×_; _,_; uncurry )
+open import Relation.Binary.PropositionalEquality using ( _≡_; refl )
 
 module _ where
   -- Ref: https://wiki.portal.chalmers.se/agda/Libraries/LightweightFreeTheorems
