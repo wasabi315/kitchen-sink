@@ -78,13 +78,7 @@ hSucc :: Arrow k => Handler Gate k a a
 hSucc = interpret \Gate -> arr succ
 
 hResX10 :: Arrow k => Handler Gate k Int Int
-hResX10 =
-  Handler
-    { valh = returnA,
-      effh = \Gate k -> proc (n, e) -> do
-        res <- k -< (n, e)
-        returnA -< res * 10
-    }
+hResX10 = Handler {valh = returnA, effh = \Gate k -> k >>> arr (* 10)}
 
 hNondet :: ArrowPlus k => Handler Gate k a a
 hNondet = interpret \Gate -> proc n -> (returnA -< n) <+> (returnA -< n + 1)
