@@ -11,6 +11,7 @@
 import Control.Arrow
 import Control.Category
 import Control.Exception (assert)
+import Data.Foldable
 import Prelude hiding (id, (.))
 
 {-
@@ -38,7 +39,6 @@ instance Arrow (Free eff) where
   arr = Arr
   first = First
 
--- Deep handler
 data Handler eff k b c = Handler
   { valh :: k b c,
     effh :: forall x y. eff x y -> k y c -> k x c
@@ -59,40 +59,40 @@ runFree Handler {..} c = go c valh
 
 -- Example
 
-data Get a b where
-  Get :: Get () Bool
+data Gate a b where
+  Gate :: Gate Int Int
 
-hTrue :: Arrow k => Handler Get k a a
-hTrue = interpret \Get -> arr (const True)
+hSucc :: Arrow k => Handler Gate k a a
+hSucc = interpret \Gate -> arr succ
 
-hFalseNot :: Arrow k => Handler Get k Bool Bool
-hFalseNot =
+hResX10 :: Arrow k => Handler Gate k Int Int
+hResX10 =
   Handler
     { valh = returnA,
-      effh = \Get k -> proc () -> do
-        x <- k -< False
-        returnA -< not x
+      effh = \Gate k -> proc n -> do
+        res <- k -< n
+        returnA -< res * 10
     }
 
-hNondet :: ArrowPlus k => Handler Get k a a
-hNondet = interpret \Get -> proc () -> (returnA -< False) <+> (returnA -< True)
+hNondet :: ArrowPlus k => Handler Gate k a a
+hNondet = interpret \Gate -> proc n -> (returnA -< n) <+> (returnA -< n + 1)
 
 main :: IO ()
 main = do
-  let test = proc () -> do
-        x <- Eff Get -< ()
-        y <- Eff Get -< ()
-        z <- Eff Get -< ()
-        returnA -< x && y && z
+  let test = proc n -> do
+        m <- Eff Gate -< n
+        o <- Eff Gate -< n + m
+        returnA -< o
 
-  assertIO do
-    runFree hTrue test () == True
-  assertIO do
-    runFree hFalseNot test () == True
-  assertIO do
-    runKleisli (runFree hNondet test) () == Just False
-  assertIO do
-    runKleisli (runFree hNondet test) () == [False, False, False, False, False, False, False, True]
+  for_ [0 .. 10] \n -> do
+    assertIO do
+      runFree hSucc test n == 2 * n + 2
+    assertIO do
+      runFree hResX10 test n == 200 * n
+    assertIO do
+      runKleisli (runFree hNondet test) n == Just (2 * n)
+    assertIO do
+      runKleisli (runFree hNondet test) n == [2 * n, 2 * n + 1, 2 * n + 1, 2 * n + 2]
 
   putStrLn "OK"
 
