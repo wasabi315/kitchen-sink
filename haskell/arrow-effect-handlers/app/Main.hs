@@ -1,6 +1,7 @@
 {-# LANGUAGE Arrows #-}
 {-# LANGUAGE BlockArguments #-}
 {-# LANGUAGE GADTs #-}
+{-# LANGUAGE PartialTypeSignatures #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE ScopedTypeVariables #-}
@@ -41,21 +42,32 @@ instance Arrow (Free eff) where
 
 data Handler eff k b c = Handler
   { valh :: k b c,
-    effh :: forall x y. eff x y -> k y c -> k x c
+    effh :: forall x y e. eff x y -> k (y, e) c -> k (x, e) c
   }
 
 interpret :: Arrow k => (forall x y. eff x y -> k x y) -> Handler eff k a a
-interpret f = Handler {valh = returnA, effh = \eff k -> f eff >>> k}
+interpret f = Handler {valh = returnA, effh = \eff k -> first (f eff) >>> k}
 
--- Can we relax the constraint ArrowApply to Arrow?
-runFree :: forall eff k a b c. ArrowApply k => Handler eff k b c -> Free eff a b -> k a c
-runFree Handler {..} c = go c valh
+runFree :: forall eff k a b c. Arrow k => Handler eff k b c -> Free eff a b -> k a c
+runFree Handler {..} m = arr unit >>> go m (arr deunit >>> valh)
   where
-    go :: Free eff x y -> k y c -> k x c
-    go (Arr f) k = arr f >>> k
+    go :: Free eff x y -> k (y, e) c -> k (x, e) c
+    go (Arr f) k = first (arr f) >>> k
     go (Eff eff) k = effh eff k
     go (Comp f g) k = go f $ go g k
-    go (First f) k = proc (v, u) -> go f (proc w -> k -< (w, u)) -<< v
+    go (First f) k = arr assoc >>> go f (arr unassoc >>> k)
+
+unit :: a -> (a, ())
+unit a = (a, ())
+
+deunit :: (a, ()) -> a
+deunit (a, ()) = a
+
+assoc :: ((a, b), c) -> (a, (b, c))
+assoc ((a, b), c) = (a, (b, c))
+
+unassoc :: (a, (b, c)) -> ((a, b), c)
+unassoc (a, (b, c)) = ((a, b), c)
 
 -- Example
 
@@ -69,21 +81,22 @@ hResX10 :: Arrow k => Handler Gate k Int Int
 hResX10 =
   Handler
     { valh = returnA,
-      effh = \Gate k -> proc n -> do
-        res <- k -< n
+      effh = \Gate k -> proc (n, e) -> do
+        res <- k -< (n, e)
         returnA -< res * 10
     }
 
 hNondet :: ArrowPlus k => Handler Gate k a a
 hNondet = interpret \Gate -> proc n -> (returnA -< n) <+> (returnA -< n + 1)
 
+test :: Free Gate Int Int
+test = proc n -> do
+  m <- Eff Gate -< n
+  o <- Eff Gate -< n + m
+  returnA -< o
+
 main :: IO ()
 main = do
-  let test = proc n -> do
-        m <- Eff Gate -< n
-        o <- Eff Gate -< n + m
-        returnA -< o
-
   for_ [0 .. 10] \n -> do
     assertIO do
       runFree hSucc test n == 2 * n + 2
