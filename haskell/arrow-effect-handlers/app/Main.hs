@@ -1,10 +1,12 @@
 {-# LANGUAGE Arrows #-}
 {-# LANGUAGE BlockArguments #-}
 {-# LANGUAGE GADTs #-}
+{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE PartialTypeSignatures #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TupleSections #-}
 
 -- Arrow with effect handlers
 -- Ref: https://www.kurims.kyoto-u.ac.jp/~tsanada/papers/jssst2023-arrow-handler.pdf
@@ -42,51 +44,58 @@ instance Arrow (Free eff) where
 
 data Handler eff k b c = Handler
   { valh :: k b c,
-    effh :: forall x y e. eff x y -> k (y, e) c -> k (x, e) c
+    effh :: forall x y s. eff x y -> k (y, s) c -> k (x, s) c
   }
 
 interpret :: Arrow k => (forall x y. eff x y -> k x y) -> Handler eff k a a
 interpret f = Handler {valh = returnA, effh = \eff k -> first (f eff) >>> k}
 
 runFree :: forall eff k a b c. Arrow k => Handler eff k b c -> Free eff a b -> k a c
-runFree Handler {..} m = arr unit >>> go m (arr deunit >>> valh)
+runFree Handler {..} m = unit >>> go m (unitInv >>> valh)
   where
-    go :: Free eff x y -> k (y, e) c -> k (x, e) c
+    go :: forall x y s. Free eff x y -> k (y, s) c -> k (x, s) c
     go (Arr f) k = first (arr f) >>> k
     go (Eff eff) k = effh eff k
     go (Comp f g) k = go f $ go g k
-    go (First f) k = arr assoc >>> go f (arr unassoc >>> k)
+    go (First f) k = assoc >>> go f (assocInv >>> k)
 
-unit :: a -> (a, ())
-unit a = (a, ())
+unit :: Arrow k => k a (a, ())
+unit = arr (,())
 
-deunit :: (a, ()) -> a
-deunit (a, ()) = a
+unitInv :: Arrow k => k (a, ()) a
+unitInv = arr fst
 
-assoc :: ((a, b), c) -> (a, (b, c))
-assoc ((a, b), c) = (a, (b, c))
+assoc :: Arrow k => k ((a, b), c) (a, (b, c))
+assoc = arr \((a, b), c) -> (a, (b, c))
 
-unassoc :: (a, (b, c)) -> ((a, b), c)
-unassoc (a, (b, c)) = ((a, b), c)
+assocInv :: Arrow k => k (a, (b, c)) ((a, b), c)
+assocInv = arr \(a, (b, c)) -> ((a, b), c)
 
 -- Example
 
-data Gate a b where
-  Gate :: Gate Int Int
+data Ops a b where
+  F :: Ops Int Int
 
-hSucc :: Arrow k => Handler Gate k a a
-hSucc = interpret \Gate -> arr succ
+hSucc :: Arrow k => Handler Ops k a a
+hSucc = interpret \case
+  F -> arr succ
 
-hResX10 :: Arrow k => Handler Gate k Int Int
-hResX10 = Handler {valh = returnA, effh = \Gate k -> k >>> arr (* 10)}
+hResX10 :: Arrow k => Handler Ops k Int Int
+hResX10 =
+  Handler
+    { valh = returnA,
+      effh = \case
+        F -> \k -> k >>> arr (* 10)
+    }
 
-hNondet :: ArrowPlus k => Handler Gate k a a
-hNondet = interpret \Gate -> proc n -> (returnA -< n) <+> (returnA -< n + 1)
+hNondet :: ArrowPlus k => Handler Ops k a a
+hNondet = interpret \case
+  F -> proc n -> (returnA -< n) <+> (returnA -< n + 1)
 
-test :: Free Gate Int Int
+test :: Free Ops Int Int
 test = proc n -> do
-  m <- Eff Gate -< n
-  o <- Eff Gate -< n + m
+  m <- Eff F -< n
+  o <- Eff F -< n + m
   returnA -< o
 
 main :: IO ()
