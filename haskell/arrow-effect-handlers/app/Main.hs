@@ -8,7 +8,7 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TupleSections #-}
 
--- Arrow with effect handlers
+-- Effect handlers for arrows
 -- Ref: https://www.kurims.kyoto-u.ac.jp/~tsanada/papers/jssst2023-arrow-handler.pdf
 
 import Control.Arrow
@@ -19,68 +19,68 @@ import Prelude hiding (id, (.))
 
 {-
 
-  \o x. Q         | proc x -> Q
-  L o M           | L -< M
+  λᵒ x. Q         | proc x -> Q
+  L ● M           | L -< M
   [M]             | returnA -< M
   let x <= P in Q | do { x <- P; Q }
   op(M)           | Eff op -< M
-  handle R with H | ???
+  handle R with H | (| (handleWith H) R |)
 
 -}
 
-data Free eff a b where
-  Arr :: (a -> b) -> Free eff a b
-  Eff :: eff a b -> Free eff a b
-  Comp :: Free eff a b -> Free eff b c -> Free eff a c
-  First :: Free eff a b -> Free eff (a, c) (b, c)
+data Eff op b c where
+  Arr :: (b -> c) -> Eff op b c
+  Op :: op b c -> Eff op b c
+  Comp :: Eff op b c -> Eff op c d -> Eff op b d
+  First :: Eff op b c -> Eff op (b, d) (c, d)
 
-instance Category (Free eff) where
+instance Category (Eff op) where
   id = Arr id
   (.) = flip Comp
 
-instance Arrow (Free eff) where
+instance Arrow (Eff op) where
   arr = Arr
   first = First
 
-data Handler eff k b c = Handler
-  { valh :: k b c,
-    effh :: forall x y s. eff x y -> k (y, s) c -> k (x, s) c
+data Handler op a c d = Handler
+  { valh :: a c d,
+    effh :: forall x y s. op x y -> a (y, s) d -> a (x, s) d
   }
 
-interpret :: Arrow k => (forall x y. eff x y -> k x y) -> Handler eff k a a
-interpret f = Handler {valh = returnA, effh = \eff k -> first (f eff) >>> k}
+interpret :: Arrow a => (forall x y. op x y -> a x y) -> Handler op a b b
+interpret f = Handler {valh = returnA, effh = \op k -> first (f op) >>> k}
 
-runFree :: forall eff k a b c. Arrow k => Handler eff k b c -> Free eff a b -> k a c
-runFree Handler {..} m = unit >>> go m (unitInv >>> valh)
+handleWith :: forall op a b c d. Arrow a => Handler op a c d -> Eff op b c -> a b d
+handleWith Handler {..} m = unit >>> go m (unitInv >>> valh)
   where
-    go :: forall x y s. Free eff x y -> k (y, s) c -> k (x, s) c
+    go :: forall x y s. Eff op x y -> a (y, s) d -> a (x, s) d
     go (Arr f) k = first (arr f) >>> k
-    go (Eff eff) k = effh eff k
+    go (Op eff) k = effh eff k
     go (Comp f g) k = go f $ go g k
     go (First f) k = assoc >>> go f (assocInv >>> k)
 
-unit :: Arrow k => k a (a, ())
+unit :: Arrow a => a b (b, ())
 unit = arr (,())
 
-unitInv :: Arrow k => k (a, ()) a
+unitInv :: Arrow a => a (b, ()) b
 unitInv = arr fst
 
-assoc :: Arrow k => k ((a, b), c) (a, (b, c))
+assoc :: Arrow a => a ((b, c), d) (b, (c, d))
 assoc = arr \((a, b), c) -> (a, (b, c))
 
-assocInv :: Arrow k => k (a, (b, c)) ((a, b), c)
+assocInv :: Arrow a => a (b, (c, d)) ((b, c), d)
 assocInv = arr \(a, (b, c)) -> ((a, b), c)
 
 -- Example
 
-data Ops a b where
+data Ops b c where
   F :: Ops Int Int
 
-hSucc :: Arrow k => Handler Ops k a a
+hSucc :: Arrow a => Handler Ops a b b
 hSucc = interpret \case
   F -> arr succ
 
-hResX10 :: Arrow k => Handler Ops k Int Int
+hResX10 :: Arrow a => Handler Ops a Int Int
 hResX10 =
   Handler
     { valh = returnA,
@@ -88,27 +88,32 @@ hResX10 =
         F -> \k -> k >>> arr (* 10)
     }
 
-hNondet :: ArrowPlus k => Handler Ops k a a
+hNondet :: ArrowPlus a => Handler Ops a b b
 hNondet = interpret \case
   F -> proc n -> (returnA -< n) <+> (returnA -< n + 1)
 
-test :: Free Ops Int Int
+test :: Eff Ops Int Int
 test = proc n -> do
-  m <- Eff F -< n
-  o <- Eff F -< n + m
+  m <- Op F -< n
+  o <- Op F -< n + m
   returnA -< o
+
+test2 :: Arrow a => Handler Ops a Int Int -> a Int Int
+test2 h = proc n -> do
+  r <- (| (handleWith h) (do test -< n) |)
+  returnA -< r + n
 
 main :: IO ()
 main = do
   for_ [0 .. 10] \n -> do
     assertIO do
-      runFree hSucc test n == 2 * n + 2
+      handleWith hSucc test n == 2 * n + 2
     assertIO do
-      runFree hResX10 test n == 200 * n
+      handleWith hResX10 test n == 200 * n
     assertIO do
-      runKleisli (runFree hNondet test) n == Just (2 * n)
+      runKleisli (handleWith hNondet test) n == [2 * n, 2 * n + 1, 2 * n + 1, 2 * n + 2]
     assertIO do
-      runKleisli (runFree hNondet test) n == [2 * n, 2 * n + 1, 2 * n + 1, 2 * n + 2]
+      runKleisli (test2 hNondet) n == Just (2 * n + n)
 
   putStrLn "OK"
 
