@@ -6,7 +6,6 @@
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE ScopedTypeVariables #-}
-{-# LANGUAGE TupleSections #-}
 
 -- Effect handlers for arrows
 -- Ref: https://www.kurims.kyoto-u.ac.jp/~tsanada/papers/jssst2023-arrow-handler.pdf
@@ -14,7 +13,6 @@
 import Control.Arrow
 import Control.Category
 import Control.Exception (assert)
-import Data.Foldable
 import Prelude hiding (id, (.))
 
 {-
@@ -24,7 +22,7 @@ import Prelude hiding (id, (.))
   [M]             | returnA -< M
   let x <= P in Q | do { x <- P; Q }
   op(M)           | Eff op -< M
-  handle R with H | (| (handleWith H) R |)
+  handle R with H | (| (handleWith H) R |) <additional input>
 
 -}
 
@@ -42,79 +40,81 @@ instance Arrow (Eff op) where
   arr = Arr
   first = First
 
-data Handler op a c d = Handler
-  { valh :: a c d,
-    effh :: forall x y s. op x y -> a (y, s) d -> a (x, s) d
+data Handler op a e' r r' = Handler
+  { valh :: a (e', r) r',
+    effh :: forall i o x. op i o -> a (o, e', x) r' -> a (i, e', x) r'
   }
 
-interpret :: Arrow a => (forall x y. op x y -> a x y) -> Handler op a b b
-interpret f = Handler {valh = returnA, effh = \op k -> first (f op) >>> k}
+interpret :: (Arrow a) => (forall i o. op i o -> a i o) -> Handler op a () b b
+interpret f =
+  Handler
+    { valh = arr snd,
+      effh = \op k -> proc (x, b', z) -> do
+        y <- f op -< x
+        k -< (y, b', z)
+    }
 
-handleWith :: forall op a b c d. Arrow a => Handler op a c d -> Eff op b c -> a b d
-handleWith Handler {..} m = unit >>> go m (unitInv >>> valh)
+handleWith ::
+  forall op a e s e' r r'.
+  (Arrow a) =>
+  Handler op a e' r r' ->
+  Eff op (e, s) r ->
+  a (e, (e', s)) r'
+handleWith Handler {..} m = proc (e, (e', s)) -> do
+  go m (proc (r, e', ()) -> valh -< (e', r)) -< ((e, s), e', ())
   where
-    go :: forall x y s. Eff op x y -> a (y, s) d -> a (x, s) d
-    go (Arr f) k = first (arr f) >>> k
-    go (Op eff) k = effh eff k
+    go :: forall i o x. Eff op i o -> a (o, e', x) r' -> a (i, e', x) r'
+    go (Arr f) k = proc (i, e', x) -> k -< (f i, e', x)
+    go (Op op) k = effh op k
     go (Comp f g) k = go f $ go g k
-    go (First f) k = assoc >>> go f (assocInv >>> k)
-
-unit :: Arrow a => a b (b, ())
-unit = arr (,())
-
-unitInv :: Arrow a => a (b, ()) b
-unitInv = arr fst
-
-assoc :: Arrow a => a ((b, c), d) (b, (c, d))
-assoc = arr \((a, b), c) -> (a, (b, c))
-
-assocInv :: Arrow a => a (b, (c, d)) ((b, c), d)
-assocInv = arr \(a, (b, c)) -> ((a, b), c)
+    go (First f) k = proc ((i, x'), e', x) ->
+      go f (proc (o, e', (x', x)) -> k -< ((o, x'), e', x)) -< (i, e', (x', x))
 
 -- Example
 
-data Ops b c where
-  F :: Ops Int Int
+data SuccPred b c where
+  Succ :: SuccPred Int Int
+  Pred :: SuccPred Int Int
 
-hSucc :: Arrow a => Handler Ops a b b
-hSucc = interpret \case
-  F -> arr succ
+runSucc :: (Arrow a) => Eff SuccPred b c -> a b c
+runSucc m = proc b -> (| (handleWith h) (m -< b) |) ()
+  where
+    h = interpret \case
+      Succ -> arr succ
+      Pred -> arr pred
 
-hResX10 :: Arrow a => Handler Ops a Int Int
-hResX10 =
-  Handler
-    { valh = returnA,
-      effh = \case
-        F -> \k -> k >>> arr (* 10)
-    }
+testSucc :: (Arrow a) => a Int Int
+testSucc = runSucc proc n -> do
+  m <- Op Succ -< n
+  o <- Op Pred -< n
+  returnA -< m + o
 
-hNondet :: ArrowPlus a => Handler Ops a b b
-hNondet = interpret \case
-  F -> proc n -> (returnA -< n) <+> (returnA -< n + 1)
+data State s b c where
+  Get :: State s b s
+  Set :: State s s ()
 
-test :: Eff Ops Int Int
-test = proc n -> do
-  m <- Op F -< n
-  o <- Op F -< n + m
-  returnA -< o
+runState :: forall a s b c. (Arrow a) => Eff (State s) b c -> a (s, b) (s, c)
+runState m = proc (s, a) -> (| (handleWith h) (m -< a) |) s
+  where
+    h :: Handler (State s) a s r (s, r)
+    h =
+      Handler
+        { valh = returnA,
+          effh = \cases
+            Get k -> proc (_, s, x) -> k -< (s, s, x)
+            Set k -> proc (s', _, x) -> k -< ((), s', x)
+        }
 
-test2 :: Arrow a => Handler Ops a Int Int -> a Int Int
-test2 h = proc n -> do
-  r <- (| (handleWith h) (do test -< n) |)
-  returnA -< r + n
+testState :: (Arrow a) => a (Int, Int) (Int, Int)
+testState = runState proc n -> do
+  s <- Op Get -< ()
+  Op Set -< n + s
+  returnA -< s
 
 main :: IO ()
 main = do
-  for_ [0 .. 10] \n -> do
-    assertIO do
-      handleWith hSucc test n == 2 * n + 2
-    assertIO do
-      handleWith hResX10 test n == 200 * n
-    assertIO do
-      runKleisli (handleWith hNondet test) n == [2 * n, 2 * n + 1, 2 * n + 1, 2 * n + 2]
-    assertIO do
-      runKleisli (test2 hNondet) n == Just (2 * n + n)
-
+  assertIO $ testSucc 10 == 20
+  assertIO $ testState (10, 20) == (30, 10)
   putStrLn "OK"
 
 assertIO :: Bool -> IO ()
