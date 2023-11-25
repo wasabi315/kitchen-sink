@@ -18,10 +18,22 @@ common defaults
         -Wredundant-constraints
         -O2
 
-executable stopwatch
+library
+    import: defaults
+    hs-source-dirs: src
+    exposed-modules:
+        Control.Arrow.Effect
+        Control.Arrow.Effect.ArrowApply
+        Control.Arrow.Effect.Church
+        Control.Arrow.Effect.MoreInputs
+    build-depends:
+        base >=4.16
+
+executable arrow-effect-handlers-exe
     import: defaults
     hs-source-dirs: app
     main-is: Main.hs
     build-depends:
-        base ^>=4.17.2.0,
-        arrows
+        base >=4.16,
+        arrows,
+        arrow-effect-handlers
