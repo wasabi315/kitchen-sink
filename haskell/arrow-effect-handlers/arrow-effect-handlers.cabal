@@ -24,10 +24,11 @@ library
     exposed-modules:
         Control.Arrow.Effect
         Control.Arrow.Effect.ArrowApply
-        Control.Arrow.Effect.Church
+        Control.Arrow.Effect.Final
         Control.Arrow.Effect.MoreInputs
     build-depends:
-        base >=4.16
+        base >=4.16,
+        constraints
 
 executable arrow-effect-handlers-exe
     import: defaults

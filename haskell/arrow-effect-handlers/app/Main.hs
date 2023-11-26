@@ -12,7 +12,7 @@ module Main (module Main) where
 import Control.Arrow
 import Control.Arrow.Effect
 import Control.Arrow.Effect.ArrowApply qualified as ArrowApply
-import Control.Arrow.Effect.Church qualified as Church
+import Control.Arrow.Effect.Final qualified as Final
 import Control.Arrow.Effect.MoreInputs qualified as MoreInputs
 import Prelude hiding (id, (.))
 
@@ -27,9 +27,9 @@ runSuccRes =
         effh = \SuccRes k -> k >>> arr succ
       }
 
-runSuccResC :: (Arrow a) => Church.Eff SuccRes b Int -> a b Int
+runSuccResC :: (Arrow a) => Final.Eff SuccRes b Int -> a b Int
 runSuccResC =
-  Church.handleWith
+  Final.handleWith
     Handler
       { valh = returnA,
         effh = \SuccRes k -> k >>> arr succ
@@ -49,10 +49,10 @@ testSuccRes = runSuccRes proc n -> do
   o <- Op SuccRes -< m
   returnA -< m + o
 
-testSuccResC :: Int -> Int
-testSuccResC = runSuccResC proc n -> do
-  m <- Church.op SuccRes -< 2 * n
-  o <- Church.op SuccRes -< m
+testSuccResF :: Int -> Int
+testSuccResF = runSuccResC proc n -> do
+  m <- Final.op SuccRes -< 2 * n
+  o <- Final.op SuccRes -< m
   returnA -< m + o
 
 testSuccResAA :: Int -> Int
@@ -86,6 +86,6 @@ testState = runState proc n -> do
 main :: IO ()
 main = do
   print $ testSuccRes 10
-  print $ testSuccResC 10
+  print $ testSuccResF 10
   print $ testSuccResAA 10
   print $ testState (2, 40)

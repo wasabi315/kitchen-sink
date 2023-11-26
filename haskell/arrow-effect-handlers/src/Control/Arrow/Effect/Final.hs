@@ -3,7 +3,7 @@
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE TupleSections #-}
 
-module Control.Arrow.Effect.Church
+module Control.Arrow.Effect.Final
   ( Eff (..),
     Handler (..),
     op,
@@ -33,7 +33,7 @@ unassoc :: (Arrow a) => a (b, (c, d)) ((b, c), d)
 unassoc = arr \(b, (c, d)) -> ((b, c), d)
 
 --------------------------------------------------------------------------------
--- A Church encoded (really?) version of the effectuful arrows
+-- A final-encoded (really?) version of the effectuful arrows
 
 newtype Eff op b c = Eff
   { runEff ::
