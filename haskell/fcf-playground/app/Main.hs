@@ -7,6 +7,7 @@
 import Data.Type.Bool qualified as TB
 import Data.Type.Equality
 import Fcf
+import Fcf.Data.List
 import Fcf.Data.Nat
 import GHC.TypeNats qualified as TN
 
@@ -34,13 +35,13 @@ type family NthImpl (i :: Nat) (xs :: Stream a) :: a where
   NthImpl 0 (x ':> _) = x
   NthImpl i (_ ':> xs) = NthImpl (i TN.- 1) (Eval xs)
 
-data Take :: Nat -> Stream a -> Exp [a]
+data STake :: Nat -> Stream a -> Exp [a]
 
-type instance Eval (Take n xs) = TakeImpl n xs
+type instance Eval (STake n xs) = STakeImpl n xs
 
-type family TakeImpl (n :: Nat) (xs :: Stream a) :: [a] where
-  TakeImpl 0 _ = '[]
-  TakeImpl n (x ':> xs) = x ': TakeImpl (n TN.- 1) (Eval xs)
+type family STakeImpl (n :: Nat) (xs :: Stream a) :: [a] where
+  STakeImpl 0 _ = '[]
+  STakeImpl n (x ':> xs) = x ': STakeImpl (n TN.- 1) (Eval xs)
 
 -- Construction
 
@@ -67,16 +68,12 @@ type instance Eval (Map f (x ':> xs)) = (f @@ x) ':> (Map f =<< xs)
 
 -- Examples
 
-data Nats :: Exp (Stream Nat)
+type Nats = Iterate' ((+) 1) 0
 
-type instance Eval Nats = Eval (Iterate' ((+) 1) 0)
-
-_testNats :: Eval (Take 10 =<< Nats) :~: '[0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+_testNats :: Eval (STake 10 =<< Nats) :~: '[0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
 _testNats = Refl
 
-data Fibs :: Exp (Stream Nat)
-
-type instance Eval Fibs = Eval (Unfold FibF '(0, 1))
+type Fibs = Unfold FibF '(0, 1)
 
 data FibF :: (Nat, Nat) -> Exp (Nat, (Nat, Nat))
 
@@ -88,19 +85,19 @@ _testFibs = Refl
 --------------------------------------------------------------------------------
 -- Regular Language
 
-infixl 1 :+
+infixl 1 \/
 
-infixl 2 :.
+infixl 2 .
 
 data Lang a = Lang Bool (a -> Exp (Lang a))
 
-type family Accept (l :: Lang a) :: Bool where
+type family Accept l where
   Accept ('Lang a _) = a
 
-type family Deriv (l :: Lang a) (x :: a) :: Lang a where
+type family Deriv l x where
   Deriv ('Lang _ d) x = d @@ x
 
-type family Member (xs :: [a]) (l :: Lang a) :: Bool where
+type family Member xs l where
   Member '[] l = Accept l
   Member (x ': xs) l = Member xs (Deriv l x)
 
@@ -116,22 +113,19 @@ data EpsilonD :: a -> Exp (Lang a)
 
 type instance Eval (EpsilonD _) = Empty
 
-type family Single (x :: a) :: Lang a where
-  Single x = 'Lang 'False (SingleD x)
+type Single x = 'Lang 'False (SingleD x)
 
 data SingleD :: a -> a -> Exp (Lang a)
 
 type instance Eval (SingleD x y) = If (Eval (TyEq x y)) Epsilon Empty
 
-type family (l1 :: Lang a) :+ (l2 :: Lang a) :: Lang a where
-  l1 :+ l2 = 'Lang (Accept l1 TB.|| Accept l2) (UnionD l1 l2)
+type l1 \/ l2 = 'Lang (Accept l1 TB.|| Accept l2) (UnionD l1 l2)
 
 data UnionD :: Lang a -> Lang a -> a -> Exp (Lang a)
 
-type instance Eval (UnionD l1 l2 x) = Deriv l1 x :+ Deriv l2 x
+type instance Eval (UnionD l1 l2 x) = Deriv l1 x \/ Deriv l2 x
 
-type family (l1 :: Lang a) :. (l2 :: Lang a) :: Lang a where
-  l1 :. l2 = 'Lang (Accept l1 TB.&& Accept l2) (ConcatD l1 l2)
+type l1 . l2 = 'Lang (Accept l1 TB.&& Accept l2) (ConcatD l1 l2)
 
 data ConcatD :: Lang a -> Lang a -> a -> Exp (Lang a)
 
@@ -139,29 +133,30 @@ type instance
   Eval (ConcatD l1 l2 x) =
     If
       (Accept l1)
-      (Deriv l1 x :. l2 :+ Deriv l2 x)
-      (Deriv l1 x :. l2)
+      (Deriv l1 x . l2 \/ Deriv l2 x)
+      (Deriv l1 x . l2)
 
-type family Kleene (l :: Lang a) :: Lang a where
-  Kleene l = 'Lang 'True (KleeneD l)
+type Kleene l = 'Lang 'True (KleeneD l)
 
 data KleeneD :: Lang a -> a -> Exp (Lang a)
 
-type instance Eval (KleeneD l x) = Deriv l x :. Kleene l
+type instance Eval (KleeneD l x) = Deriv l x . Kleene l
 
 -- Example
 
-type family OneOf (xs :: [a]) :: Lang a where
-  OneOf '[] = Empty
-  OneOf (x ': xs) = Single x :+ OneOf xs
+type OneOf xs = 'Lang 'False (OneOfD xs)
+
+data OneOfD :: [a] -> a -> Exp (Lang a)
+
+type instance Eval (OneOfD xs x) = If (Eval (Elem x xs)) Epsilon Empty
 
 type Zero = Single '0'
 
 type NonZero = OneOf '[ '1', '2', '3', '4', '5', '6', '7', '8', '9']
 
-type Digit = Zero :+ NonZero
+type Digit = Zero \/ NonZero
 
-type Number = Zero :+ NonZero :. Kleene Digit
+type Number = Zero \/ NonZero . Kleene Digit
 
 _testNumber1 :: Member '[] Number :~: 'False
 _testNumber1 = Refl
