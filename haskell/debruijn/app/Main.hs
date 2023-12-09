@@ -55,7 +55,7 @@ church = \n -> lam $ lam $ applyN n (var @1) (var @0)
   where
     applyN :: Integer -> Term i -> Term i -> Term i
     applyN 0 _ x = x
-    applyN n f x = applyN (n - 1) f (f @ x)
+    applyN n f x = f @ applyN (n - 1) f x
 
 pretty :: ClosedTerm -> String
 pretty t = prettySub 0 t ""
