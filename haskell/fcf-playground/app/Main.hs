@@ -31,7 +31,7 @@ data Nth :: Nat -> Stream a -> Exp a
 
 type instance Eval (Nth n xs) = NthImpl n xs
 
-type family NthImpl (i :: Nat) (xs :: Stream a) :: a where
+type family NthImpl i xs where
   NthImpl 0 (x ':> _) = x
   NthImpl i (_ ':> xs) = NthImpl (i TN.- 1) (Eval xs)
 
@@ -39,28 +39,15 @@ data STake :: Nat -> Stream a -> Exp [a]
 
 type instance Eval (STake n xs) = STakeImpl n xs
 
-type family STakeImpl (n :: Nat) (xs :: Stream a) :: [a] where
+type family STakeImpl n xs where
   STakeImpl 0 _ = '[]
   STakeImpl n (x ':> xs) = x ': STakeImpl (n TN.- 1) (Eval xs)
 
 -- Construction
 
-data Repeat :: a -> Exp (Stream a)
+data Iterate :: (s -> Exp a) -> (s -> Exp s) -> s -> Exp (Stream a)
 
-type instance Eval (Repeat x) = x ':> Repeat x
-
-data Iterate' :: (a -> Exp a) -> a -> Exp (Stream a)
-
--- (f x) is forced thus the name
-type instance Eval (Iterate' f x) = x ':> Iterate' f (f @@ x)
-
-data Unfold :: (b -> Exp (a, b)) -> b -> Exp (Stream a)
-
-data UnfoldCase :: (b -> Exp (a, b)) -> (a, b) -> Exp (Stream a)
-
-type instance Eval (Unfold f b) = Eval (UnfoldCase f (f @@ b))
-
-type instance Eval (UnfoldCase f '(a, b)) = a ':> Unfold f b
+type instance Eval (Iterate f g x) = (f @@ x) ':> Iterate f g (g @@ x)
 
 -- Functor
 
@@ -68,16 +55,16 @@ type instance Eval (Map f (x ':> xs)) = (f @@ x) ':> (Map f =<< xs)
 
 -- Examples
 
-type Nats = Iterate' ((+) 1) 0
+type Nats = Iterate Pure ((+) 1) 0
 
 _testNats :: Eval (STake 10 =<< Nats) :~: '[0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
 _testNats = Refl
 
-type Fibs = Unfold FibF '(0, 1)
+type Fibs = Iterate Fst FibF '(0, 1)
 
-data FibF :: (Nat, Nat) -> Exp (Nat, (Nat, Nat))
+data FibF :: (Nat, Nat) -> Exp (Nat, Nat)
 
-type instance Eval (FibF '(a, b)) = '(a, '(b, a TN.+ b))
+type instance Eval (FibF '(a, b)) = '(b, a TN.+ b)
 
 _testFibs :: Eval (Nth 100 =<< Fibs) :~: 354224848179261915075
 _testFibs = Refl
