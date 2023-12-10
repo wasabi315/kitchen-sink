@@ -167,8 +167,25 @@ data Fix :: (Exp a -> Exp a) -> Exp a
 
 type instance Eval (Fix f) = Eval (f (Fix f))
 
-_testFix :: Eval (Fix (ConstFn 1)) :~: 1
-_testFix = Refl
+-- Example
+
+data LenF :: Exp ([a] -> Exp Nat) -> [a] -> Exp Nat
+
+type instance Eval (LenF f '[]) = 0
+
+type instance Eval (LenF f (_ ': xs)) = 1 TN.+ Eval (Eval f xs)
+
+data LenF' :: Exp ([a] -> Exp Nat) -> Exp ([a] -> Exp Nat)
+
+type instance Eval (LenF' f) = LenF f
+
+type Len = Eval (Fix LenF')
+
+_testLen1 :: Eval (Len '[]) :~: 0
+_testLen1 = Refl
+
+_testLen2 :: Eval (Len '[1, 2, 3]) :~: 3
+_testLen2 = Refl
 
 --------------------------------------------------------------------------------
 
