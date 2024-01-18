@@ -12,98 +12,98 @@ infixr 5 _·_ _·'_
 data FreeMonoid (A : Type) : Type where
   ε : FreeMonoid A
   [_] : (x : A) → FreeMonoid A
-  _·_ : (m₁ m₂ : FreeMonoid A) → FreeMonoid A
+  _·_ : (m n : FreeMonoid A) → FreeMonoid A
 
-  εₗ : ∀ m₁ → ε · m₁ ≡ m₁
-  εᵣ : ∀ m₁ → m₁ · ε ≡ m₁
-  assoc : ∀ m₁ m₂ m₃ → m₁ · (m₂ · m₃) ≡ (m₁ · m₂) · m₃
+  εₗ : ∀ m → ε · m ≡ m
+  εᵣ : ∀ m → m · ε ≡ m
+  assoc : ∀ m n o → m · (n · o) ≡ (m · n) · o
   trunc : isSet (FreeMonoid A)
 
 mutual
 
-  -- slow append: (m ·' n) appends n next to the rightmost node in m
+  -- slow append: (m ·' n) appends n next to the rightmost node of m
   _·'_ : ∀ {A} → FreeMonoid A → FreeMonoid A → FreeMonoid A
-  ε ·' m₂ = m₂
-  [ x ] ·' m₂ = [ x ] · m₂
-  (m₁ · m₂) ·' m₃ = m₁ · (m₂ ·' m₃)
-  εₗ m₁ i ·' m₂ = εₗ (m₁ ·' m₂) i
-  εᵣ m₁ i ·' m₂ = m·n≡m·'n m₁ m₂ i
-  assoc m₁ m₂ m₃ i ·' m₄ = assoc m₁ m₂ (m₃ ·' m₄) i
-  trunc m₁ m₂ p q i j ·' m₃ =
-    trunc (m₁ ·' m₃) (m₂ ·' m₃) (cong (_·' m₃) p) (cong (_·' m₃) q) i j
+  ε ·' n = n
+  [ x ] ·' n = [ x ] · n
+  (m · n) ·' o = m · (n ·' o)
+  εₗ m i ·' n = εₗ (m ·' n) i
+  εᵣ m i ·' n = m·n≡m·'n m n i
+  assoc m n o i ·' p = assoc m n (o ·' p) i
+  trunc m n p q i j ·' o =
+    trunc (m ·' o) (n ·' o) (cong (_·' o) p) (cong (_·' o) q) i j
 
-  m·n≡m·'n : ∀ {A} (m₁ m₂ : FreeMonoid A) → m₁ · m₂ ≡ m₁ ·' m₂
-  m·n≡m·'n ε m₂ = εₗ m₂
-  m·n≡m·'n [ x ] m₂ = refl
-  m·n≡m·'n (m₁ · m₂) m₃ = sym (assoc _ _ _) ∙ cong (m₁ ·_) (m·n≡m·'n m₂ m₃)
-  m·n≡m·'n (εₗ m₁ i) m₂ = isSet→isSet' trunc
-    -- (m·n≡m·'n (ε · m₁) m₂) expanded
-    (sym (assoc _ _ _) ∙ cong (ε ·_) (m·n≡m·'n m₁ m₂))
-    (m·n≡m·'n m₁ m₂)
-    (λ i → εₗ m₁ i · m₂)
-    -- (λ i → εₗ m₁ i ·' m₂) expanded
-    (εₗ (m₁ ·' m₂))
+  m·n≡m·'n : ∀ {A} (m n : FreeMonoid A) → m · n ≡ m ·' n
+  m·n≡m·'n ε n = εₗ n
+  m·n≡m·'n [ x ] n = refl
+  m·n≡m·'n (m · n) o = sym (assoc _ _ _) ∙ cong (m ·_) (m·n≡m·'n n o)
+  m·n≡m·'n (εₗ m i) n = isSet→isSet' trunc
+    -- (m·n≡m·'n (ε · m) n) expanded
+    (sym (assoc _ _ _) ∙ cong (ε ·_) (m·n≡m·'n m n))
+    (m·n≡m·'n m n)
+    (λ i → εₗ m i · n)
+    -- (λ i → εₗ m i ·' n) expanded
+    (εₗ (m ·' n))
     i
-  m·n≡m·'n (εᵣ m₁ i) m₂ = isSet→isSet' trunc
-    -- (m·n≡m·'n (m₁ · ε) m₂) expanded
-    (sym (assoc _ _ _) ∙ cong (m₁ ·_) (εₗ m₂))
-    (m·n≡m·'n m₁ m₂)
-    (λ i → εᵣ m₁ i · m₂)
-    -- (λ i → εᵣ m₁ i ·' m₂) expanded
-    (m·n≡m·'n m₁ m₂)
+  m·n≡m·'n (εᵣ m i) n = isSet→isSet' trunc
+    -- (m·n≡m·'n (m · ε) n) expanded
+    (sym (assoc _ _ _) ∙ cong (m ·_) (εₗ n))
+    (m·n≡m·'n m n)
+    (λ i → εᵣ m i · n)
+    -- (λ i → εᵣ m i ·' n) expanded
+    (m·n≡m·'n m n)
     i
-  m·n≡m·'n (assoc m₁ m₂ m₃ i) m₄ = isSet→isSet' trunc
-    -- (m·n≡m·'n (m₁ · m₂ · m₃) m₄) expanded
-    (sym (assoc _ _ _) ∙ cong (m₁ ·_) (sym (assoc _ _ _) ∙ cong (m₂ ·_) (m·n≡m·'n m₃ m₄)))
-    -- (m·n≡m·'n ((m₁ · m₂) · m₃) m₄) expanded
-    (sym (assoc _ _ _) ∙ cong ((m₁ · m₂) ·_) (m·n≡m·'n m₃ m₄))
-    (λ i → assoc m₁ m₂ m₃ i · m₄)
-    -- (λ i → assoc m₁ m₂ m₃ i ·' m₄) expanded
-    (assoc m₁ m₂ (m₃ ·' m₄))
+  m·n≡m·'n (assoc m n o i) p = isSet→isSet' trunc
+    -- (m·n≡m·'n (m · n · o) p) expanded
+    (sym (assoc _ _ _) ∙ cong (m ·_) (sym (assoc _ _ _) ∙ cong (n ·_) (m·n≡m·'n o p)))
+    -- (m·n≡m·'n ((m · n) · o) p) expanded
+    (sym (assoc _ _ _) ∙ cong ((m · n) ·_) (m·n≡m·'n o p))
+    (λ i → assoc m n o i · p)
+    -- (λ i → assoc m n o i ·' p) expanded
+    (assoc m n (o ·' p))
     i
-  m·n≡m·'n (trunc m₁ m₂ p q i j) m₃ = isGroupoid→isGroupoid' (isSet→isGroupoid trunc)
-    (λ i → m·n≡m·'n (p i) m₃)
-    (λ i → m·n≡m·'n (q i) m₃)
-    (λ i → m·n≡m·'n m₁ m₃)
-    (λ i → m·n≡m·'n m₂ m₃)
-    (λ i j → trunc m₁ m₂ p q i j · m₃)
-    -- (λ i j → trunc m₁ m₂ p q i j ·' m₃) expanded
-    (trunc (m₁ ·' m₃) (m₂ ·' m₃) (cong (_·' m₃) p) (cong (_·' m₃) q))
+  m·n≡m·'n (trunc m n p q i j) o = isGroupoid→isGroupoid' (isSet→isGroupoid trunc)
+    (λ i → m·n≡m·'n (p i) o)
+    (λ i → m·n≡m·'n (q i) o)
+    (λ i → m·n≡m·'n m o)
+    (λ i → m·n≡m·'n n o)
+    (λ i j → trunc m n p q i j · o)
+    -- (λ i j → trunc m n p q i j ·' o) expanded
+    (trunc (m ·' o) (n ·' o) (cong (_·' o) p) (cong (_·' o) q))
     i j
 
 module Elim {A} {P : FreeMonoid A → Type}
   (ε* : P ε)
   ([_]* : (x : A) → P [ x ])
-  (_·*_ : ∀ {m₁ m₂} → P m₁ → P m₂ → P (m₁ · m₂))
-  (εₗ* : ∀ {m₁} (m₁* : P m₁)
-    → PathP (λ i → P (εₗ m₁ i)) (ε* ·* m₁*) m₁*)
-  (εᵣ* : ∀ {m₁} (m₁* : P m₁)
-    → PathP (λ i → P (εᵣ m₁ i)) (m₁* ·* ε*) (m₁*))
-  (assoc* : ∀ {m₁ m₂ m₃} (m₁* : P m₁) (m₂* : P m₂) (m₃* : P m₃)
-    → PathP (λ i → P (assoc m₁ m₂ m₃ i)) (m₁* ·* (m₂* ·* m₃*)) ((m₁* ·* m₂*) ·* m₃*))
-  (trunc* : ∀ m₁ → isSet (P m₁))
+  (_·*_ : ∀ {m n} → P m → P n → P (m · n))
+  (εₗ* : ∀ {m} (m* : P m)
+    → PathP (λ i → P (εₗ m i)) (ε* ·* m*) m*)
+  (εᵣ* : ∀ {m} (m* : P m)
+    → PathP (λ i → P (εᵣ m i)) (m* ·* ε*) (m*))
+  (assoc* : ∀ {m n o} (m* : P m) (n* : P n) (o* : P o)
+    → PathP (λ i → P (assoc m n o i)) (m* ·* (n* ·* o*)) ((m* ·* n*) ·* o*))
+  (trunc* : ∀ m → isSet (P m))
   where
 
-  f : (m₁ : FreeMonoid A) → P m₁
+  f : (m : FreeMonoid A) → P m
   f ε = ε*
   f [ x ] = [ x ]*
-  f (m₁ · m₂) = f m₁ ·* f m₂
-  f (εₗ m₁ i) = εₗ* (f m₁) i
-  f (εᵣ m₁ i) = εᵣ* (f m₁) i
-  f (assoc m₁ m₂ m₃ i) = assoc* (f m₁) (f m₂) (f m₃) i
-  f (trunc m₁ m₂ p q i j) = isOfHLevel→isOfHLevelDep 2 trunc* (f m₁) (f m₂) (cong f p) (cong f q) (trunc m₁ m₂ p q) i j
+  f (m · n) = f m ·* f n
+  f (εₗ m i) = εₗ* (f m) i
+  f (εᵣ m i) = εᵣ* (f m) i
+  f (assoc m n o i) = assoc* (f m) (f n) (f o) i
+  f (trunc m n p q i j) = isOfHLevel→isOfHLevelDep 2 trunc* (f m) (f n) (cong f p) (cong f q) (trunc m n p q) i j
 
-module ElimProp {A} {P : FreeMonoid A → Type} (PProp : {m₁ : FreeMonoid A} → isProp (P m₁))
+module ElimProp {A} {P : FreeMonoid A → Type} (PProp : {m : FreeMonoid A} → isProp (P m))
   (ε* : P ε)
   ([_]* : (x : A) → P [ x ])
-  (_·*_ : ∀ {m₁ m₂} → P m₁ → P m₂ → P (m₁ · m₂))
+  (_·*_ : ∀ {m n} → P m → P n → P (m · n))
   where
 
-  f : (m₁ : FreeMonoid A) → P m₁
+  f : (m : FreeMonoid A) → P m
   f = Elim.f ε* [_]* _·*_
-    (λ {m₁} m₁* → toPathP (PProp (transport (λ i → P (εₗ m₁ i)) (ε* ·* m₁*)) m₁*))
-    (λ {m₁} m₁* → toPathP (PProp (transport (λ i → P (εᵣ m₁ i)) (m₁* ·* ε*)) m₁*))
-    (λ {m₁ m₂ m₃} m₁* m₂* m₃* → toPathP (PProp (transport (λ i → P (assoc m₁ m₂ m₃ i)) (m₁* ·* (m₂* ·* m₃*))) ((m₁* ·* m₂*) ·* m₃*)))
+    (λ {m} m* → toPathP (PProp (transport (λ i → P (εₗ m i)) (ε* ·* m*)) m*))
+    (λ {m} m* → toPathP (PProp (transport (λ i → P (εᵣ m i)) (m* ·* ε*)) m*))
+    (λ {m n o} m* n* o* → toPathP (PProp (transport (λ i → P (assoc m n o i)) (m* ·* (n* ·* o*))) ((m* ·* n*) ·* o*)))
     (λ _ → isProp→isSet PProp)
 
 module Rec {A B : Type} (BType : isSet B)
@@ -115,17 +115,17 @@ module Rec {A B : Type} (BType : isSet B)
   (assoc* : ∀ (x y z : B) → x ·* (y ·* z) ≡ (x ·* y) ·* z)
   where
 
-  f : (m₁ : FreeMonoid A) → B
+  f : (m : FreeMonoid A) → B
   f = Elim.f ε* [_]* _·*_ εₗ* εᵣ* assoc* (const BType)
 
 reverse : ∀ {A} → FreeMonoid A → FreeMonoid A
 reverse =
-  Rec.f trunc ε [_] (flip _·_) εᵣ εₗ (λ m₁ m₂ m₃ → sym (assoc m₃ m₂ m₁))
+  Rec.f trunc ε [_] (flip _·_) εᵣ εₗ (λ m n o → sym (assoc o n m))
 
-reverse-involutive : ∀ {A} (m₁ : FreeMonoid A) → reverse (reverse m₁) ≡ m₁
+reverse-involutive : ∀ {A} (m : FreeMonoid A) → reverse (reverse m) ≡ m
 reverse-involutive =
   ElimProp.f
-    (λ {m₁} → trunc (reverse (reverse m₁)) m₁)
+    (λ {m} → trunc (reverse (reverse m)) m)
     refl
     (λ _ → refl)
     (λ p q → cong₂ _·_ p q)
@@ -136,7 +136,7 @@ map f = Rec.f trunc ε ([_] ∘ f) _·_ εₗ εᵣ assoc
 map-id : ∀ {A} → map (idfun A) ≡ idfun (FreeMonoid A)
 map-id = funExt $
   ElimProp.f
-    (λ {m₁} → trunc (map (idfun _) m₁) m₁)
+    (λ {m} → trunc (map (idfun _) m) m)
     refl
     (λ _ → refl)
     (λ p q → cong₂ _·_ p q)
@@ -144,7 +144,7 @@ map-id = funExt $
 map-∘ : ∀ {A B C} (f : B → C) (g : A → B) → map f ∘ map g ≡ map (f ∘ g)
 map-∘ f g = funExt $
   ElimProp.f
-    (λ {m₁} → trunc ((map f ∘ map g) m₁) (map (f ∘ g) m₁))
+    (λ {m} → trunc ((map f ∘ map g) m) (map (f ∘ g) m))
     refl
     (λ _ → refl)
     (λ p q → cong₂ _·_ p q)
@@ -155,7 +155,7 @@ join = Rec.f trunc ε (idfun (FreeMonoid _)) _·_ εₗ εᵣ assoc
 map-pure-join : ∀ {A} → join ∘ map [_] ≡ idfun (FreeMonoid A)
 map-pure-join = funExt $
   ElimProp.f
-    (λ {m₁} → trunc ((join ∘ map [_]) m₁) m₁)
+    (λ {m} → trunc ((join ∘ map [_]) m) m)
     refl
     (λ _ → refl)
     (λ p q → cong₂ _·_ p q)
