@@ -57,6 +57,9 @@ hcompLater-test : ∀ (A : ▹ Type) φ (u : I → Partial φ (▸ A))
   → (u0 : (▸ A) [ φ ↦ u i0 ]) → hcompLater A φ u u0 ≡ hcompLater-prim A φ u u0
 hcompLater-test A φ u x = λ _ → hcompLater-prim A φ u x
 
+later-ext : ∀ {A : Set} → {f g : ▹ A} → (▸ \ α → f α ≡ g α) → f ≡ g
+later-ext eq = \ i α → eq α i
+
 postulate
   dfix : ∀ {ℓ} {A : Type ℓ} → (▹ A → A) → ▹ A
   pfix : ∀ {ℓ} {A : Type ℓ} (f : ▹ A → A) → dfix f ≡ (\ _ → f (dfix f))
@@ -66,6 +69,17 @@ pfix' f α i = pfix f i α
 
 fix : ∀ {ℓ} {A : Type ℓ} → (▹ A → A) → A
 fix f = f (dfix f)
+
+--------------------------------------------------------------------------------
+-- The delay monad
+
+data Delay (A : Type) : Type where
+  now : A → Delay A
+  later : ▹ Delay A → Delay A
+  later-later : ∀ x → x ≡ later (next x)
+
+⊥ : ∀ {A} → Delay A
+⊥ = fix λ ⊥▹ → later ⊥▹
 
 --------------------------------------------------------------------------------
 -- The finite language example but in Guarded Agda
@@ -116,10 +130,18 @@ _* = fix λ where
   *▹ a .ν → true
   *▹ a .δ x α → δ a x α · *▹ α a
 
-_∈_ : ∀ {A} → List A → Lang A → Bool
-_∈_ = fix λ where
-  ∈▹ [] a → ν a
-  -- How to supply ticks below?
-  ∈▹ (x ∷ xs) a → ∈▹ {!   !} xs (δ a x {!   !})
+-- I want Bool here instead but don't know how
+_∈_ : ∀ {A} → List A → Lang A → Delay Bool
+[] ∈ a = now (ν a)
+(x ∷ xs) ∈ a = later λ α → xs ∈ δ a x α
 
 bip-bop = (⟦ true ⟧ · ⟦ false ⟧) *
+
+test₁ : (true ∷ false ∷ []) ∈ bip-bop ≡ now true
+test₁ =
+  sym (
+    later-later (now true) ∙
+    cong later (later-ext λ α →
+      later-later (now true) ∙
+      cong later (later-ext λ α' →
+        cong now {!   !})))
