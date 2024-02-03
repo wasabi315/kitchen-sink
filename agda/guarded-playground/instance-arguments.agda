@@ -58,7 +58,7 @@ hcompLater A φ u u0 = hcomp (λ { i (φ = i1) → u i 1=1 }) (outS u0)
 
 later-ext : ∀ {A : Type} {f g : ▹ A}
   → ▸ (f ≡ g)
-  → (λ {{@tick a}} → f {{a}}) ≡ (λ {{@tick a}} → g {{a}})
+  → (λ {{@tick α}} → f {{α}}) ≡ (λ {{@tick α}} → g {{α}})
 later-ext eq i = eq i
 
 postulate
