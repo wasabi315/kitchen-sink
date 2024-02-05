@@ -1,7 +1,10 @@
 {-# OPTIONS --cubical --guarded #-}
 
 open import Cubical.Foundations.Everything
-open import Cubical.Data.Nat.Base using ( ℕ; zero; suc )
+open import Cubical.Data.Empty using ( ⊥ )
+open import Cubical.Data.Unit.Base using ( Unit; tt )
+open import Cubical.Data.Sigma.Base using ( _×_; _,_ )
+open import Cubical.Relation.Binary.Base using ( Rel; graphRel )
 
 --------------------------------------------------------------------------------
 -- Ref: https://github.com/agda/agda/blob/172366db528b28fb2eda03c5fc9804f2cdb1be18/test/Succeed/LaterPrims.agda
@@ -70,6 +73,12 @@ fix f = f (dfix f)
 -- Is it safe to assume irrelevance of ticks?
 postulate
   tick-irr : ∀ (x : ▹ A) → ▸ λ α → ▸ λ β → x α ≡ x β
+
+foo : ∀ {A : Type ℓ} → Path (▹ A → ▹ ▹ A) next (map▹ next)
+foo = funExt λ x → later-ext (λ α → later-ext λ β → sym (tick-irr x α β))
+
+-- tick-irr' : ∀ (x : ▹ A) →  Path (▹ ▹ A) (λ (@tick α β) → x α) (λ (@tick α β) → x β)
+-- tick-irr' x = later-ext λ α → later-ext λ β → tick-irr x α β
 
 --------------------------------------------------------------------------------
 -- Colists and operations on them
@@ -141,10 +150,9 @@ rule-scanl f z (x ∷ xs) =
 -- Ref: https://wiki.portal.chalmers.se/agda/Libraries/LightweightFreeTheorems
 
 infixr 0 _[→]_
-infixr 5 _[∷]_
 
 [Type_] : ∀ ℓ → Type ℓ → Type ℓ → Type (ℓ-suc ℓ)
-[Type ℓ ] A₁ A₂ = A₁ → A₂ → Type ℓ
+[Type ℓ ] A₁ A₂ = Rel A₁ A₂ _
 [Type₁] = [Type (ℓ-suc ℓ-zero) ]
 [Type] = [Type ℓ-zero ]
 
@@ -180,14 +188,17 @@ _[→]_ : ∀ {A₁ A₂ B₁ B₂} →
 [▹]_ : ∀ {A₁ A₂} → [Type ℓ ] A₁ A₂ → [Type ℓ ] (▹ A₁) (▹ A₂)
 [▹] [A] = [▸] λ _ → [A]
 
-data [Colist] {A₁ A₂} ([A] : [Type] A₁ A₂) : [Type] (Colist A₁) (Colist A₂) where
-  [[]] : [Colist] [A] [] []
-  _[∷]_ : ([A] [→] [▹] [Colist] [A] [→] [Colist] [A]) _∷_ _∷_
+--------------------------------------------------------------------------------
 
-[Colist]-map : ∀ {f : A → B} {xs} →
-  [Colist] (λ x y → f x ≡ y) xs (map f xs)
-[Colist]-map {xs = []} = [[]]
-[Colist]-map {xs = x ∷ xs} = refl [∷] λ α → [Colist]-map {xs = xs α}
+[Colist] : ([Type] [→] [Type]) Colist Colist
+[Colist] [A] [] [] = Unit
+[Colist] [A] [] (x ∷ xs) = ⊥
+[Colist] [A] (x ∷ xs) [] = ⊥
+[Colist] [A] (x ∷ xs) (y ∷ ys) = [A] x y × ▸ λ α → [Colist] [A] (xs α) (ys α)
+
+[Colist]-map : ∀ {f : A → B} {xs} → [Colist] (graphRel f) xs (map f xs)
+[Colist]-map {xs = []} = tt
+[Colist]-map {xs = x ∷ xs} = refl , λ α → [Colist]-map {xs = xs α}
 
 Foldr : Type₁
 Foldr = Πᵢ Type λ A → Πᵢ Type λ B → (A → ▹ B → B) → B → Colist A → B
@@ -197,10 +208,11 @@ Foldr = Πᵢ Type λ A → Πᵢ Type λ B → (A → ▹ B → B) → B → Co
   ([A] [→] [▹] [B] [→] [B]) [→] [B] [→] [Colist] [A] [→] [B]
 
 module [Foldr]
-    {foldr-like : Foldr}
-    ([foldr-like] : [Foldr] foldr-like foldr-like)
+  {foldr-like : Foldr}
+  ([foldr-like] : [Foldr] foldr-like foldr-like)
   where
 
+  -- A version of parametricity where the relations are specialized to functions
   corollary1 : ∀ {A A' B B'}
     → {f : A → ▹ B → B} {f' : A' → ▹ B' → B'} {z : B} {z' : B'}
     → {g : A → A'} {h : B → B'}
@@ -209,8 +221,8 @@ module [Foldr]
     → h ∘ foldr-like f z ≡ foldr-like f' z' ∘ map g
   corollary1 {f = f} {f' = f'} {g = g} {h = h} p q =
     funExt λ xs → [foldr-like]
-      (λ x y → g x ≡ y)
-      (λ x y → h x ≡ y)
+      (graphRel g)
+      (graphRel h)
       (λ {x x'} [x] {y y'} [y] →
           h (f x y)
         ≡⟨ p x y ⟩
@@ -231,9 +243,17 @@ module [Foldr]
       foldr-like c n
     ∎
 
--- Parametricity for foldr
 [foldr] : [Foldr] foldr foldr
-[foldr] [A] [B] [f] [z] [[]] = [z]
-[foldr] [A] [B] [f] [z] ([x] [∷] [xs]) = [f] [x] λ α → [foldr] [A] [B] [f] [z] ([xs] α)
+[foldr] [A] [B] [f] [z] {[]} {[]} tt = [z]
+[foldr] [A] [B] [f] [z] {_ ∷ _} {_ ∷ _} ([x] , [xs]) = [f] [x] λ α → [foldr] [A] [B] [f] [z] ([xs] α)
 
-Free-Theorem-Foldr = ∀ (f : Foldr) → [Foldr] f f
+[ColistC] : ([Type] [→] [Type₁]) ColistC ColistC
+[ColistC] [A] = [Πᵢ] [Type] λ [B] → ([A] [→] [▹] [B] [→] [B]) [→] [B] [→] [B]
+
+module [ColistC] {xs : ColistC A} ([xs] : [ColistC] (Path A) xs xs) where
+
+  foldr/build : ∀ {c : A → ▹ B → B} {n : B} → foldr c n (build xs) ≡ xs c n
+  foldr/build {c = c} {n} = [xs]
+    (graphRel (foldr c n))
+    (λ [x] [y] → cong₂ c [x] (later-ext [y]))
+    refl
