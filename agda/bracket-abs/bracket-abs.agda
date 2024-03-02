@@ -15,6 +15,7 @@ cong-app₂ : ∀ {A B C : Set} {f g : A → B → C}
 cong-app₂ refl x y = refl
 
 --------------------------------------------------------------------------------
+-- STLC
 
 infixr 7 _`→_
 infixl 5 _,_
@@ -64,31 +65,29 @@ lookupCtx {Γ , α} {suc n} (s≤s p) = lookupCtx p
   → Term Γ (lookupCtx (toWitness n∈Γ))
 #_ n {n∈Γ} = var (ℕ-to-index (toWitness n∈Γ))
 
---------------------------------------------------------------------------------
-
 ⟦_⟧ᵗ : Ty → Set
 ⟦ `⊤ ⟧ᵗ = ⊤
 ⟦ α `→ β ⟧ᵗ = ⟦ α ⟧ᵗ → ⟦ β ⟧ᵗ
 
-data Env : Ctx → Set where
-  ∙ : Env ∙
-  _,_ : Env Γ → ⟦ α ⟧ᵗ → Env (Γ , α)
+data e : Ctx → Set where
+  ∙ : e ∙
+  _,_ : e Γ → ⟦ α ⟧ᵗ → e (Γ , α)
 
-lookupEnv : Env Γ → Γ ∋ α → ⟦ α ⟧ᵗ
-lookupEnv (env , x) zero = x
-lookupEnv (env , _) (suc i) = lookupEnv env i
+lookupEnv : e Γ → Γ ∋ α → ⟦ α ⟧ᵗ
+lookupEnv (e , x) zero = x
+lookupEnv (e , _) (suc i) = lookupEnv e i
 
-⟦_⟧′ : Term Γ α → Env Γ → ⟦ α ⟧ᵗ
-⟦ tt ⟧′ env = tt
-⟦ var i ⟧′ env = lookupEnv env i
-⟦ ƛ t ⟧′ env x = ⟦ t ⟧′ (env , x)
-⟦ t · s ⟧′ env = ⟦ t ⟧′ env (⟦ s ⟧′ env)
+⟦_⟧′ : Term Γ α → e Γ → ⟦ α ⟧ᵗ
+⟦ tt ⟧′ e = tt
+⟦ var i ⟧′ e = lookupEnv e i
+⟦ ƛ t ⟧′ e x = ⟦ t ⟧′ (e , x)
+⟦ t · s ⟧′ e = ⟦ t ⟧′ e (⟦ s ⟧′ e)
 
 ⟦_⟧ : Term ∙ α → ⟦ α ⟧ᵗ
 ⟦_⟧ t = ⟦ t ⟧′ ∙
 
 --------------------------------------------------------------------------------
--- Bracket abstraction
+-- Combinators
 
 data SKI : Ty → Set where
   tt : SKI `⊤
@@ -108,6 +107,9 @@ data SKI : Ty → Set where
 ⟦ C ⟧ˢ = flip
 ⟦ t · s ⟧ˢ = ⟦ t ⟧ˢ ⟦ s ⟧ˢ
 
+--------------------------------------------------------------------------------
+-- Bracket abstraction
+
 data Conv : Ctx → Ty → Set where
   -- C: Already converted
   done : (t : SKI α) → Conv Γ α
@@ -118,11 +120,11 @@ data Conv : Ctx → Ty → Set where
   -- W: Ignore the topmost variable in the context
   ignore-top : (t : Conv Γ β) → Conv (Γ , α) β
 
-⟦_⟧ᶜ : Conv Γ α → Env Γ → ⟦ α ⟧ᵗ
-⟦ done t ⟧ᶜ env = ⟦ t ⟧ˢ
-⟦ top ⟧ᶜ (env , x) = x
-⟦ use-top t ⟧ᶜ (env , x) = ⟦ t ⟧ᶜ env x
-⟦ ignore-top t ⟧ᶜ (env , x) = ⟦ t ⟧ᶜ env
+⟦_⟧ᶜ : Conv Γ α → e Γ → ⟦ α ⟧ᵗ
+⟦ done t ⟧ᶜ e = ⟦ t ⟧ˢ
+⟦ top ⟧ᶜ (e , x) = x
+⟦ use-top t ⟧ᶜ (e , x) = ⟦ t ⟧ᶜ e x
+⟦ ignore-top t ⟧ᶜ (e , x) = ⟦ t ⟧ᶜ e
 
 infixl 5 _$$_
 
@@ -163,76 +165,74 @@ bracket : Term ∙ α → SKI α
 bracket t with done s ← bracket′ t = s
 
 --------------------------------------------------------------------------------
+-- Bracket abstraction does not change the denotational semantics
 
 module _ where
   open ≡-Reasoning
-  open import Tactic.Cong
 
-  ⟦-⟧ᶜ-bracket-var : ∀ (i : Γ ∋ α) env
-    → ⟦ bracket-var i ⟧ᶜ env ≡ lookupEnv env i
-  ⟦-⟧ᶜ-bracket-var zero (env , x) = refl
-  ⟦-⟧ᶜ-bracket-var (suc i) (env , x) = ⟦-⟧ᶜ-bracket-var i env
+  ⟦-⟧ᶜ-$$-dist : ∀ (t : Conv Γ (α `→ β)) (s : Conv Γ α) e
+    → ⟦ t $$ s ⟧ᶜ e ≡ ⟦ t ⟧ᶜ e (⟦ s ⟧ᶜ e)
+  ⟦-⟧ᶜ-$$-dist (done t) (done s) e = refl
+  ⟦-⟧ᶜ-$$-dist (done t) top (e , x) = refl
+  ⟦-⟧ᶜ-$$-dist (done t) (use-top s) (e , x) =
+    cong-app (⟦-⟧ᶜ-$$-dist (done (B · t)) s e) x
+  ⟦-⟧ᶜ-$$-dist (done t) (ignore-top s) (e , x) =
+    ⟦-⟧ᶜ-$$-dist (done t) s e
+  ⟦-⟧ᶜ-$$-dist top (done t) (e , x) = refl
+  ⟦-⟧ᶜ-$$-dist top (use-top s) (e , x) =
+    cong-app (⟦-⟧ᶜ-$$-dist (done (S · I)) s e) x
+  ⟦-⟧ᶜ-$$-dist top (ignore-top s) (e , x) =
+    cong-app (⟦-⟧ᶜ-$$-dist (done (C · I)) s e) x
+  ⟦-⟧ᶜ-$$-dist (use-top t) (done s) (e , x) =
+    cong-app (⟦-⟧ᶜ-$$-dist (done (C · C · s)) t e) x
+  ⟦-⟧ᶜ-$$-dist (use-top t) top (e , x) = begin
+    ⟦ done S $$ t $$ done I ⟧ᶜ e x  ≡⟨ cong-app (⟦-⟧ᶜ-$$-dist (done S $$ t) (done I) e) x ⟩
+    ⟦ done S $$ t ⟧ᶜ e id x         ≡⟨ cong-app₂ (⟦-⟧ᶜ-$$-dist (done S) t e) id x ⟩
+    ⟦ t ⟧ᶜ e x x                    ∎
+  ⟦-⟧ᶜ-$$-dist (use-top t) (use-top s) (e , x) = begin
+    ⟦ done S $$ t $$ s ⟧ᶜ e x        ≡⟨ cong-app (⟦-⟧ᶜ-$$-dist (done S $$ t) s e) x ⟩
+    ⟦ done S $$ t ⟧ᶜ e (⟦ s ⟧ᶜ e) x  ≡⟨ cong-app₂ (⟦-⟧ᶜ-$$-dist (done S) t e) _ x ⟩
+    ⟦ t ⟧ᶜ e x (⟦ s ⟧ᶜ e x)          ∎
+  ⟦-⟧ᶜ-$$-dist (use-top t) (ignore-top s) (e , x) = begin
+    ⟦ done C $$ t $$ s ⟧ᶜ e x        ≡⟨ cong-app (⟦-⟧ᶜ-$$-dist (done C $$ t) s e) x ⟩
+    ⟦ done C $$ t ⟧ᶜ e (⟦ s ⟧ᶜ e) x  ≡⟨ cong-app₂ (⟦-⟧ᶜ-$$-dist (done C) t e) _ x ⟩
+    ⟦ t ⟧ᶜ e x (⟦ s ⟧ᶜ e)            ∎
+  ⟦-⟧ᶜ-$$-dist (ignore-top t) (done s) (e , x) =
+    ⟦-⟧ᶜ-$$-dist t (done s) e
+  ⟦-⟧ᶜ-$$-dist (ignore-top t) top (e , x) = refl
+  ⟦-⟧ᶜ-$$-dist (ignore-top t) (use-top s) (e , x) = begin
+    ⟦ done B $$ t $$ s ⟧ᶜ e x        ≡⟨ cong-app (⟦-⟧ᶜ-$$-dist (done B $$ t) s e) x ⟩
+    ⟦ done B $$ t ⟧ᶜ e (⟦ s ⟧ᶜ e) x  ≡⟨ cong-app₂ (⟦-⟧ᶜ-$$-dist (done B) t e) _ x ⟩
+    ⟦ t ⟧ᶜ e (⟦ s ⟧ᶜ e x)            ∎
+  ⟦-⟧ᶜ-$$-dist (ignore-top t) (ignore-top s) (e , x) =
+    ⟦-⟧ᶜ-$$-dist t s e
 
-  ⟦-⟧ᶜ-$$-dist : ∀ (t : Conv Γ (α `→ β)) (s : Conv Γ α) env
-    → ⟦ t $$ s ⟧ᶜ env ≡ ⟦ t ⟧ᶜ env (⟦ s ⟧ᶜ env)
-  ⟦-⟧ᶜ-$$-dist (done t) (done s) env = refl
-  ⟦-⟧ᶜ-$$-dist (done t) top (env , x) = refl
-  ⟦-⟧ᶜ-$$-dist (done t) (use-top s) (env , x) =
-    cong-app (⟦-⟧ᶜ-$$-dist (done (B · t)) s env) x
-  ⟦-⟧ᶜ-$$-dist (done t) (ignore-top s) (env , x) =
-    ⟦-⟧ᶜ-$$-dist (done t) s env
-  ⟦-⟧ᶜ-$$-dist top (done t) (env , x) = refl
-  ⟦-⟧ᶜ-$$-dist top (use-top s) (env , x) =
-    cong-app (⟦-⟧ᶜ-$$-dist (done (S · I)) s env) x
-  ⟦-⟧ᶜ-$$-dist top (ignore-top s) (env , x) =
-    cong-app (⟦-⟧ᶜ-$$-dist (done (C · I)) s env) x
-  ⟦-⟧ᶜ-$$-dist (use-top t) (done s) (env , x) =
-    cong-app (⟦-⟧ᶜ-$$-dist (done (C · C · s)) t env) x
-  ⟦-⟧ᶜ-$$-dist (use-top t) top (env , x) = begin
-    ⟦ done S $$ t $$ done I ⟧ᶜ env x  ≡⟨ cong-app (⟦-⟧ᶜ-$$-dist (done S $$ t) (done I) env) x ⟩
-    ⟦ done S $$ t ⟧ᶜ env id x         ≡⟨ cong-app₂ (⟦-⟧ᶜ-$$-dist (done S) t env) id x ⟩
-    ⟦ t ⟧ᶜ env x x                    ∎
-  ⟦-⟧ᶜ-$$-dist (use-top t) (use-top s) (env , x) = begin
-    ⟦ done S $$ t $$ s ⟧ᶜ env x          ≡⟨ cong-app (⟦-⟧ᶜ-$$-dist (done S $$ t) s env) x ⟩
-    ⟦ done S $$ t ⟧ᶜ env (⟦ s ⟧ᶜ env) x  ≡⟨ cong-app₂ (⟦-⟧ᶜ-$$-dist (done S) t env) _ x ⟩
-    ⟦ t ⟧ᶜ env x (⟦ s ⟧ᶜ env x)          ∎
-  ⟦-⟧ᶜ-$$-dist (use-top t) (ignore-top s) (env , x) = begin
-    ⟦ done C $$ t $$ s ⟧ᶜ env x          ≡⟨ cong-app (⟦-⟧ᶜ-$$-dist (done C $$ t) s env) x ⟩
-    ⟦ done C $$ t ⟧ᶜ env (⟦ s ⟧ᶜ env) x  ≡⟨ cong-app₂ (⟦-⟧ᶜ-$$-dist (done C) t env) _ x ⟩
-    ⟦ t ⟧ᶜ env x (⟦ s ⟧ᶜ env)            ∎
-  ⟦-⟧ᶜ-$$-dist (ignore-top t) (done s) (env , x) =
-    ⟦-⟧ᶜ-$$-dist t (done s) env
-  ⟦-⟧ᶜ-$$-dist (ignore-top t) top (env , x) = refl
-  ⟦-⟧ᶜ-$$-dist (ignore-top t) (use-top s) (env , x) = begin
-    ⟦ done B $$ t $$ s ⟧ᶜ env x          ≡⟨ cong-app (⟦-⟧ᶜ-$$-dist (done B $$ t) s env) x ⟩
-    ⟦ done B $$ t ⟧ᶜ env (⟦ s ⟧ᶜ env) x  ≡⟨ cong-app₂ (⟦-⟧ᶜ-$$-dist (done B) t env) _ x ⟩
-    ⟦ t ⟧ᶜ env (⟦ s ⟧ᶜ env x)            ∎
-  ⟦-⟧ᶜ-$$-dist (ignore-top t) (ignore-top s) (env , x) =
-    ⟦-⟧ᶜ-$$-dist t s env
+  ⟦-⟧ᶜ-bracket-var : ∀ (i : Γ ∋ α) e → ⟦ bracket-var i ⟧ᶜ e ≡ lookupEnv e i
+  ⟦-⟧ᶜ-bracket-var zero (e , x) = refl
+  ⟦-⟧ᶜ-bracket-var (suc i) (e , x) = ⟦-⟧ᶜ-bracket-var i e
 
-  ⟦-⟧ᶜ-bracket-ƛ : ∀ (t : Conv (Γ , α) β) env x
-    → ⟦ bracket-ƛ t ⟧ᶜ env x ≡ ⟦ t ⟧ᶜ (env , x)
-  ⟦-⟧ᶜ-bracket-ƛ (done t) env x = refl
-  ⟦-⟧ᶜ-bracket-ƛ top env x = refl
-  ⟦-⟧ᶜ-bracket-ƛ (use-top t) env x = refl
-  ⟦-⟧ᶜ-bracket-ƛ (ignore-top t) env x = cong-app (⟦-⟧ᶜ-$$-dist (done K) t env) x
+  ⟦-⟧ᶜ-bracket-ƛ : ∀ (t : Conv (Γ , α) β) e x
+    → ⟦ bracket-ƛ t ⟧ᶜ e x ≡ ⟦ t ⟧ᶜ (e , x)
+  ⟦-⟧ᶜ-bracket-ƛ (done t) e x = refl
+  ⟦-⟧ᶜ-bracket-ƛ top e x = refl
+  ⟦-⟧ᶜ-bracket-ƛ (use-top t) e x = refl
+  ⟦-⟧ᶜ-bracket-ƛ (ignore-top t) e x = cong-app (⟦-⟧ᶜ-$$-dist (done K) t e) x
 
   open import Axiom.Extensionality.Propositional using ( Extensionality )
 
   module _ (funExt : Extensionality _ _) where
 
-    ⟦-⟧ᶜ-bracket′ : ∀ (t : Term Γ α) env → ⟦ bracket′ t ⟧ᶜ env ≡ ⟦ t ⟧′ env
-    ⟦-⟧ᶜ-bracket′ tt env = refl
-    ⟦-⟧ᶜ-bracket′ (var i) env = ⟦-⟧ᶜ-bracket-var i env
-    ⟦-⟧ᶜ-bracket′ (ƛ t) env = funExt λ x → begin
-      ⟦ bracket-ƛ (bracket′ t) ⟧ᶜ env x  ≡⟨ ⟦-⟧ᶜ-bracket-ƛ (bracket′ t) env x ⟩
-      ⟦ bracket′ t ⟧ᶜ (env , x)          ≡⟨ ⟦-⟧ᶜ-bracket′ t (env , x) ⟩
-      ⟦ t ⟧′ (env , x)                   ∎
-    ⟦-⟧ᶜ-bracket′ (t · s) env = begin
-      ⟦ bracket′ t $$ bracket′ s ⟧ᶜ env          ≡⟨ ⟦-⟧ᶜ-$$-dist (bracket′ t) (bracket′ s) env ⟩
-      ⟦ bracket′ t ⟧ᶜ env (⟦ bracket′ s ⟧ᶜ env)  ≡⟨ cong! (⟦-⟧ᶜ-bracket′ s env) ⟩
-      ⟦ bracket′ t ⟧ᶜ env (⟦ s ⟧′ env)           ≡⟨ cong-app (⟦-⟧ᶜ-bracket′ t env) _ ⟩
-      ⟦ t ⟧′ env (⟦ s ⟧′ env)                    ∎
+    ⟦-⟧ᶜ-bracket′ : ∀ (t : Term Γ α) e → ⟦ bracket′ t ⟧ᶜ e ≡ ⟦ t ⟧′ e
+    ⟦-⟧ᶜ-bracket′ tt e = refl
+    ⟦-⟧ᶜ-bracket′ (var i) e = ⟦-⟧ᶜ-bracket-var i e
+    ⟦-⟧ᶜ-bracket′ (ƛ t) e = funExt λ x → begin
+      ⟦ bracket-ƛ (bracket′ t) ⟧ᶜ e x  ≡⟨ ⟦-⟧ᶜ-bracket-ƛ (bracket′ t) e x ⟩
+      ⟦ bracket′ t ⟧ᶜ (e , x)          ≡⟨ ⟦-⟧ᶜ-bracket′ t (e , x) ⟩
+      ⟦ t ⟧′ (e , x)                   ∎
+    ⟦-⟧ᶜ-bracket′ (t · s) e = begin
+      ⟦ bracket′ t $$ bracket′ s ⟧ᶜ e        ≡⟨ ⟦-⟧ᶜ-$$-dist (bracket′ t) (bracket′ s) e ⟩
+      ⟦ bracket′ t ⟧ᶜ e (⟦ bracket′ s ⟧ᶜ e)  ≡⟨ cong₂ _$_ (⟦-⟧ᶜ-bracket′ t e) (⟦-⟧ᶜ-bracket′ s e) ⟩
+      ⟦ t ⟧′ e (⟦ s ⟧′ e)                    ∎
 
     ⟦-⟧ˢ-bracket : ∀ (t : Term ∙ α) → ⟦ bracket t ⟧ˢ ≡ ⟦ t ⟧
     ⟦-⟧ˢ-bracket t with bracket′ t | ⟦-⟧ᶜ-bracket′ t ∙
