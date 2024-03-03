@@ -69,15 +69,15 @@ lookupCtx {Γ , α} {suc n} (s≤s p) = lookupCtx p
 ⟦ `⊤ ⟧ᵗ = ⊤
 ⟦ α `→ β ⟧ᵗ = ⟦ α ⟧ᵗ → ⟦ β ⟧ᵗ
 
-data e : Ctx → Set where
-  ∙ : e ∙
-  _,_ : e Γ → ⟦ α ⟧ᵗ → e (Γ , α)
+data Env : Ctx → Set where
+  ∙ : Env ∙
+  _,_ : Env Γ → ⟦ α ⟧ᵗ → Env (Γ , α)
 
-lookupEnv : e Γ → Γ ∋ α → ⟦ α ⟧ᵗ
+lookupEnv : Env Γ → Γ ∋ α → ⟦ α ⟧ᵗ
 lookupEnv (e , x) zero = x
 lookupEnv (e , _) (suc i) = lookupEnv e i
 
-⟦_⟧′ : Term Γ α → e Γ → ⟦ α ⟧ᵗ
+⟦_⟧′ : Term Γ α → Env Γ → ⟦ α ⟧ᵗ
 ⟦ tt ⟧′ e = tt
 ⟦ var i ⟧′ e = lookupEnv e i
 ⟦ ƛ t ⟧′ e x = ⟦ t ⟧′ (e , x)
@@ -120,7 +120,7 @@ data Conv : Ctx → Ty → Set where
   -- W: Ignore the topmost variable in the context
   ignore-top : (t : Conv Γ β) → Conv (Γ , α) β
 
-⟦_⟧ᶜ : Conv Γ α → e Γ → ⟦ α ⟧ᵗ
+⟦_⟧ᶜ : Conv Γ α → Env Γ → ⟦ α ⟧ᵗ
 ⟦ done t ⟧ᶜ e = ⟦ t ⟧ˢ
 ⟦ top ⟧ᶜ (e , x) = x
 ⟦ use-top t ⟧ᶜ (e , x) = ⟦ t ⟧ᶜ e x
