@@ -17,12 +17,12 @@ cong-app₂ refl x y = refl
 --------------------------------------------------------------------------------
 -- STLC
 
-infixr 7 _`→_
+infixr 7 _⇒_
 infixl 5 _,_
 
 data Ty : Set where
   `⊤ : Ty
-  _`→_ : (α β : Ty) → Ty
+  _⇒_ : (α β : Ty) → Ty
 
 data Ctx : Set where
   ∙ : Ctx
@@ -34,7 +34,7 @@ length (ctx , _) = suc (length ctx)
 
 private
   variable
-    Γ Δ : Ctx
+    Γ : Ctx
     α β γ : Ty
 
 infix 4 _∋_
@@ -48,8 +48,8 @@ data _∋_ : Ctx → Ty → Set where
 data Term : Ctx → Ty → Set where
   tt : Term Γ `⊤
   var : Γ ∋ α → Term Γ α
-  ƛ_ : (t : Term (Γ , α) β) → Term Γ (α `→ β)
-  _·_ : (t : Term Γ (α `→ β)) (s : Term Γ α) → Term Γ β
+  ƛ_ : (t : Term (Γ , α) β) → Term Γ (α ⇒ β)
+  _·_ : (t : Term Γ (α ⇒ β)) (s : Term Γ α) → Term Γ β
 
 infix 9 #_
 
@@ -65,21 +65,39 @@ lookupCtx {Γ , α} {suc n} (s≤s p) = lookupCtx p
   → Term Γ (lookupCtx (toWitness n∈Γ))
 #_ n {n∈Γ} = var (ℕ-to-index (toWitness n∈Γ))
 
+`id : Term ∙ (α ⇒ α)
+`id = ƛ # 0
+
+`const : Term ∙ (α ⇒ β ⇒ α)
+`const = ƛ ƛ # 1
+
+`ap : Term ∙ ((α ⇒ β ⇒ γ) ⇒ (α ⇒ β) ⇒ α ⇒ γ)
+`ap = ƛ ƛ ƛ # 2 · # 0 · (# 1 · # 0)
+
+`compose : Term ∙ ((β ⇒ γ) ⇒ (α ⇒ β) ⇒ α ⇒ γ)
+`compose = ƛ ƛ ƛ # 2 · (# 1 · # 0)
+
+`flip : Term ∙ ((α ⇒ β ⇒ γ) ⇒ β ⇒ α ⇒ γ)
+`flip = ƛ ƛ ƛ # 2 · # 0 · # 1
+
+--------------------------------------------------------------------------------
+-- Evaluation
+
 ⟦_⟧ᵗ : Ty → Set
 ⟦ `⊤ ⟧ᵗ = ⊤
-⟦ α `→ β ⟧ᵗ = ⟦ α ⟧ᵗ → ⟦ β ⟧ᵗ
+⟦ α ⇒ β ⟧ᵗ = ⟦ α ⟧ᵗ → ⟦ β ⟧ᵗ
 
-data Env : Ctx → Set where
-  ∙ : Env ∙
-  _,_ : Env Γ → ⟦ α ⟧ᵗ → Env (Γ , α)
+data ⟦_⟧ᶜ : Ctx → Set where
+  ∙ : ⟦ ∙ ⟧ᶜ
+  _,_ : (e : ⟦ Γ ⟧ᶜ) (x : ⟦ α ⟧ᵗ) → ⟦ Γ , α ⟧ᶜ
 
-lookupEnv : Env Γ → Γ ∋ α → ⟦ α ⟧ᵗ
-lookupEnv (e , x) zero = x
-lookupEnv (e , _) (suc i) = lookupEnv e i
+lookup : ⟦ Γ ⟧ᶜ → Γ ∋ α → ⟦ α ⟧ᵗ
+lookup (e , x) zero = x
+lookup (e , _) (suc i) = lookup e i
 
-⟦_⟧′ : Term Γ α → Env Γ → ⟦ α ⟧ᵗ
+⟦_⟧′ : Term Γ α → ⟦ Γ ⟧ᶜ → ⟦ α ⟧ᵗ
 ⟦ tt ⟧′ e = tt
-⟦ var i ⟧′ e = lookupEnv e i
+⟦ var i ⟧′ e = lookup e i
 ⟦ ƛ t ⟧′ e x = ⟦ t ⟧′ (e , x)
 ⟦ t · s ⟧′ e = ⟦ t ⟧′ e (⟦ s ⟧′ e)
 
@@ -91,12 +109,12 @@ lookupEnv (e , _) (suc i) = lookupEnv e i
 
 data SKI : Ty → Set where
   tt : SKI `⊤
-  I : SKI (α `→ α)
-  K : SKI (α `→ β `→ α)
-  S : SKI ((α `→ β `→ γ) `→ (α `→ β) `→ α `→ γ)
-  B : SKI ((β `→ γ) `→ (α `→ β) `→ α `→ γ)
-  C : SKI ((α `→ β `→ γ) `→ β `→ α `→ γ)
-  _·_ : (t : SKI (α `→ β)) (s : SKI α) → SKI β
+  I : SKI (α ⇒ α)
+  K : SKI (α ⇒ β ⇒ α)
+  S : SKI ((α ⇒ β ⇒ γ) ⇒ (α ⇒ β) ⇒ α ⇒ γ)
+  B : SKI ((β ⇒ γ) ⇒ (α ⇒ β) ⇒ α ⇒ γ)
+  C : SKI ((α ⇒ β ⇒ γ) ⇒ β ⇒ α ⇒ γ)
+  _·_ : (t : SKI (α ⇒ β)) (s : SKI α) → SKI β
 
 ⟦_⟧ˢ : SKI α → ⟦ α ⟧ᵗ
 ⟦ tt ⟧ˢ = tt
@@ -110,25 +128,25 @@ data SKI : Ty → Set where
 --------------------------------------------------------------------------------
 -- Bracket abstraction
 
-data Conv : Ctx → Ty → Set where
+data BTerm : Ctx → Ty → Set where
   -- C: Already converted
-  done : (t : SKI α) → Conv Γ α
+  done : (t : SKI α) → BTerm Γ α
   -- V: A reference to the topmost variable in the context
-  top : Conv (Γ , α) α
+  top : BTerm (Γ , α) α
   -- N: Apply a function `t` to the topmost variable in the context
-  use-top : (t : Conv Γ (α `→ β)) → Conv (Γ , α) β
+  use-top : (t : BTerm Γ (α ⇒ β)) → BTerm (Γ , α) β
   -- W: Ignore the topmost variable in the context
-  ignore-top : (t : Conv Γ β) → Conv (Γ , α) β
+  ignore-top : (t : BTerm Γ β) → BTerm (Γ , α) β
 
-⟦_⟧ᶜ : Conv Γ α → Env Γ → ⟦ α ⟧ᵗ
-⟦ done t ⟧ᶜ e = ⟦ t ⟧ˢ
-⟦ top ⟧ᶜ (e , x) = x
-⟦ use-top t ⟧ᶜ (e , x) = ⟦ t ⟧ᶜ e x
-⟦ ignore-top t ⟧ᶜ (e , x) = ⟦ t ⟧ᶜ e
+⟦_⟧ᵇ : BTerm Γ α → ⟦ Γ ⟧ᶜ → ⟦ α ⟧ᵗ
+⟦ done t ⟧ᵇ e = ⟦ t ⟧ˢ
+⟦ top ⟧ᵇ (e , x) = x
+⟦ use-top t ⟧ᵇ (e , x) = ⟦ t ⟧ᵇ e x
+⟦ ignore-top t ⟧ᵇ (e , x) = ⟦ t ⟧ᵇ e
 
 infixl 5 _$$_
 
-_$$_ : Conv Γ (α `→ β) → Conv Γ α → Conv Γ β
+_$$_ : BTerm Γ (α ⇒ β) → BTerm Γ α → BTerm Γ β
 done t       $$ done s       = done (t · s)
 done t       $$ top          = use-top (done t)
 done t       $$ use-top s    = use-top (done (B · t) $$ s)
@@ -145,134 +163,165 @@ ignore-top t $$ top          = use-top t
 ignore-top t $$ use-top s    = use-top (done B $$ t $$ s)
 ignore-top t $$ ignore-top s = ignore-top (t $$ s)
 
-bracket-var : Γ ∋ α → Conv Γ α
+bracket-var : Γ ∋ α → BTerm Γ α
 bracket-var zero = top
 bracket-var (suc i) = ignore-top (bracket-var i)
 
-bracket-ƛ : Conv (Γ , α) β → Conv Γ (α `→ β)
+bracket-ƛ : BTerm (Γ , α) β → BTerm Γ (α ⇒ β)
 bracket-ƛ (done t) = done (K · t)
 bracket-ƛ top = done I
 bracket-ƛ (use-top t) = t
 bracket-ƛ (ignore-top t) = done K $$ t
 
-bracket′ : Term Γ α → Conv Γ α
+bracket′ : Term Γ α → BTerm Γ α
 bracket′ tt = done tt
 bracket′ (var i) = bracket-var i
 bracket′ (ƛ t) = bracket-ƛ (bracket′ t)
 bracket′ (t · s) = bracket′ t $$ bracket′ s
 
+-- Bracket abstraction preserves the typing by construction
 bracket : Term ∙ α → SKI α
 bracket t with done s ← bracket′ t = s
 
+bracket⁻ : SKI α → Term ∙ α
+bracket⁻ tt = tt
+bracket⁻ I = `id
+bracket⁻ K = `const
+bracket⁻ S = `ap
+bracket⁻ B = `compose
+bracket⁻ C = `flip
+bracket⁻ (t · s) = bracket⁻ t · bracket⁻ s
+
 --------------------------------------------------------------------------------
--- Bracket abstraction does not change the denotational semantics
+-- Bracket abstraction preserves the semantics
+
+⟦-⟧-bracket⁻ : ∀ (t : SKI α) → ⟦ bracket⁻ t ⟧ ≡ ⟦ t ⟧ˢ
+⟦-⟧-bracket⁻ tt = refl
+⟦-⟧-bracket⁻ I = refl
+⟦-⟧-bracket⁻ K = refl
+⟦-⟧-bracket⁻ S = refl
+⟦-⟧-bracket⁻ B = refl
+⟦-⟧-bracket⁻ C = refl
+⟦-⟧-bracket⁻ (t · s) = cong₂ _$_ (⟦-⟧-bracket⁻ t) (⟦-⟧-bracket⁻ s)
 
 module _ where
   open ≡-Reasoning
 
-  ⟦-⟧ᶜ-$$-dist : ∀ (t : Conv Γ (α `→ β)) (s : Conv Γ α) e
-    → ⟦ t $$ s ⟧ᶜ e ≡ ⟦ t ⟧ᶜ e (⟦ s ⟧ᶜ e)
-  ⟦-⟧ᶜ-$$-dist (done t) (done s) e = refl
-  ⟦-⟧ᶜ-$$-dist (done t) top (e , x) = refl
-  ⟦-⟧ᶜ-$$-dist (done t) (use-top s) (e , x) =
-    cong-app (⟦-⟧ᶜ-$$-dist (done (B · t)) s e) x
-  ⟦-⟧ᶜ-$$-dist (done t) (ignore-top s) (e , x) =
-    ⟦-⟧ᶜ-$$-dist (done t) s e
-  ⟦-⟧ᶜ-$$-dist top (done t) (e , x) = refl
-  ⟦-⟧ᶜ-$$-dist top (use-top s) (e , x) =
-    cong-app (⟦-⟧ᶜ-$$-dist (done (S · I)) s e) x
-  ⟦-⟧ᶜ-$$-dist top (ignore-top s) (e , x) =
-    cong-app (⟦-⟧ᶜ-$$-dist (done (C · I)) s e) x
-  ⟦-⟧ᶜ-$$-dist (use-top t) (done s) (e , x) =
-    cong-app (⟦-⟧ᶜ-$$-dist (done (C · C · s)) t e) x
-  ⟦-⟧ᶜ-$$-dist (use-top t) top (e , x) = begin
-    ⟦ done S $$ t $$ done I ⟧ᶜ e x  ≡⟨ cong-app (⟦-⟧ᶜ-$$-dist (done S $$ t) (done I) e) x ⟩
-    ⟦ done S $$ t ⟧ᶜ e id x         ≡⟨ cong-app₂ (⟦-⟧ᶜ-$$-dist (done S) t e) id x ⟩
-    ⟦ t ⟧ᶜ e x x                    ∎
-  ⟦-⟧ᶜ-$$-dist (use-top t) (use-top s) (e , x) = begin
-    ⟦ done S $$ t $$ s ⟧ᶜ e x        ≡⟨ cong-app (⟦-⟧ᶜ-$$-dist (done S $$ t) s e) x ⟩
-    ⟦ done S $$ t ⟧ᶜ e (⟦ s ⟧ᶜ e) x  ≡⟨ cong-app₂ (⟦-⟧ᶜ-$$-dist (done S) t e) _ x ⟩
-    ⟦ t ⟧ᶜ e x (⟦ s ⟧ᶜ e x)          ∎
-  ⟦-⟧ᶜ-$$-dist (use-top t) (ignore-top s) (e , x) = begin
-    ⟦ done C $$ t $$ s ⟧ᶜ e x        ≡⟨ cong-app (⟦-⟧ᶜ-$$-dist (done C $$ t) s e) x ⟩
-    ⟦ done C $$ t ⟧ᶜ e (⟦ s ⟧ᶜ e) x  ≡⟨ cong-app₂ (⟦-⟧ᶜ-$$-dist (done C) t e) _ x ⟩
-    ⟦ t ⟧ᶜ e x (⟦ s ⟧ᶜ e)            ∎
-  ⟦-⟧ᶜ-$$-dist (ignore-top t) (done s) (e , x) =
-    ⟦-⟧ᶜ-$$-dist t (done s) e
-  ⟦-⟧ᶜ-$$-dist (ignore-top t) top (e , x) = refl
-  ⟦-⟧ᶜ-$$-dist (ignore-top t) (use-top s) (e , x) = begin
-    ⟦ done B $$ t $$ s ⟧ᶜ e x        ≡⟨ cong-app (⟦-⟧ᶜ-$$-dist (done B $$ t) s e) x ⟩
-    ⟦ done B $$ t ⟧ᶜ e (⟦ s ⟧ᶜ e) x  ≡⟨ cong-app₂ (⟦-⟧ᶜ-$$-dist (done B) t e) _ x ⟩
-    ⟦ t ⟧ᶜ e (⟦ s ⟧ᶜ e x)            ∎
-  ⟦-⟧ᶜ-$$-dist (ignore-top t) (ignore-top s) (e , x) =
-    ⟦-⟧ᶜ-$$-dist t s e
+  ⟦-⟧ᵇ-$$ : ∀ (t : BTerm Γ (α ⇒ β)) s e
+    → ⟦ t $$ s ⟧ᵇ e ≡ ⟦ t ⟧ᵇ e (⟦ s ⟧ᵇ e)
+  ⟦-⟧ᵇ-$$ (done t) (done s) e = erefl (⟦ t ⟧ˢ ⟦ s ⟧ˢ)
+  ⟦-⟧ᵇ-$$ (done t) top (e , x) = erefl (⟦ t ⟧ˢ x)
+  ⟦-⟧ᵇ-$$ (done t) (use-top s) (e , x) =
+    cong-app (⟦-⟧ᵇ-$$ (done (B · t)) s e) x
+  ⟦-⟧ᵇ-$$ (done t) (ignore-top s) (e , x) =
+    ⟦-⟧ᵇ-$$ (done t) s e
+  ⟦-⟧ᵇ-$$ top (done t) (e , x) = erefl (x ⟦ t ⟧ˢ)
+  ⟦-⟧ᵇ-$$ top (use-top s) (e , x) =
+    cong-app (⟦-⟧ᵇ-$$ (done (S · I)) s e) x
+  ⟦-⟧ᵇ-$$ top (ignore-top s) (e , x) =
+    cong-app (⟦-⟧ᵇ-$$ (done (C · I)) s e) x
+  ⟦-⟧ᵇ-$$ (use-top t) (done s) (e , x) =
+    cong-app (⟦-⟧ᵇ-$$ (done (C · C · s)) t e) x
+  ⟦-⟧ᵇ-$$ (use-top t) top (e , x) = begin
+      ⟦ done S $$ t $$ done I ⟧ᵇ e x
+    ≡⟨ cong-app (⟦-⟧ᵇ-$$ (done S $$ t) (done I) e) x ⟩
+      ⟦ done S $$ t ⟧ᵇ e id x
+    ≡⟨ cong-app₂ (⟦-⟧ᵇ-$$ (done S) t e) id x ⟩
+      ⟦ t ⟧ᵇ e x x
+    ∎
+  ⟦-⟧ᵇ-$$ (use-top t) (use-top s) (e , x) = begin
+      ⟦ done S $$ t $$ s ⟧ᵇ e x
+    ≡⟨ cong-app (⟦-⟧ᵇ-$$ (done S $$ t) s e) x ⟩
+      ⟦ done S $$ t ⟧ᵇ e (⟦ s ⟧ᵇ e) x
+    ≡⟨ cong-app₂ (⟦-⟧ᵇ-$$ (done S) t e) (⟦ s ⟧ᵇ e) x ⟩
+      ⟦ t ⟧ᵇ e x (⟦ s ⟧ᵇ e x)
+    ∎
+  ⟦-⟧ᵇ-$$ (use-top t) (ignore-top s) (e , x) = begin
+      ⟦ done C $$ t $$ s ⟧ᵇ e x
+    ≡⟨ cong-app (⟦-⟧ᵇ-$$ (done C $$ t) s e) x ⟩
+      ⟦ done C $$ t ⟧ᵇ e (⟦ s ⟧ᵇ e) x
+    ≡⟨ cong-app₂ (⟦-⟧ᵇ-$$ (done C) t e) _ x ⟩
+      ⟦ t ⟧ᵇ e x (⟦ s ⟧ᵇ e)
+    ∎
+  ⟦-⟧ᵇ-$$ (ignore-top t) (done s) (e , x) =
+    ⟦-⟧ᵇ-$$ t (done s) e
+  ⟦-⟧ᵇ-$$ (ignore-top t) top (e , x) = erefl (⟦ t ⟧ᵇ e x)
+  ⟦-⟧ᵇ-$$ (ignore-top t) (use-top s) (e , x) = begin
+      ⟦ done B $$ t $$ s ⟧ᵇ e x
+    ≡⟨ cong-app (⟦-⟧ᵇ-$$ (done B $$ t) s e) x ⟩
+      ⟦ done B $$ t ⟧ᵇ e (⟦ s ⟧ᵇ e) x
+    ≡⟨ cong-app₂ (⟦-⟧ᵇ-$$ (done B) t e) _ x ⟩
+      ⟦ t ⟧ᵇ e (⟦ s ⟧ᵇ e x)
+    ∎
+  ⟦-⟧ᵇ-$$ (ignore-top t) (ignore-top s) (e , x) =
+    ⟦-⟧ᵇ-$$ t s e
 
-  ⟦-⟧ᶜ-bracket-var : ∀ (i : Γ ∋ α) e → ⟦ bracket-var i ⟧ᶜ e ≡ lookupEnv e i
-  ⟦-⟧ᶜ-bracket-var zero (e , x) = refl
-  ⟦-⟧ᶜ-bracket-var (suc i) (e , x) = ⟦-⟧ᶜ-bracket-var i e
+  ⟦-⟧ᵇ-bracket-var : ∀ (i : Γ ∋ α) e → ⟦ bracket-var i ⟧ᵇ e ≡ lookup e i
+  ⟦-⟧ᵇ-bracket-var zero (e , x) = refl
+  ⟦-⟧ᵇ-bracket-var (suc i) (e , x) = ⟦-⟧ᵇ-bracket-var i e
 
-  ⟦-⟧ᶜ-bracket-ƛ : ∀ (t : Conv (Γ , α) β) e x
-    → ⟦ bracket-ƛ t ⟧ᶜ e x ≡ ⟦ t ⟧ᶜ (e , x)
-  ⟦-⟧ᶜ-bracket-ƛ (done t) e x = refl
-  ⟦-⟧ᶜ-bracket-ƛ top e x = refl
-  ⟦-⟧ᶜ-bracket-ƛ (use-top t) e x = refl
-  ⟦-⟧ᶜ-bracket-ƛ (ignore-top t) e x = cong-app (⟦-⟧ᶜ-$$-dist (done K) t e) x
+  ⟦-⟧ᵇ-bracket-ƛ : ∀ (t : BTerm (Γ , α) β) e
+    → ⟦ bracket-ƛ t ⟧ᵇ e ≡ (λ x → ⟦ t ⟧ᵇ (e , x))
+  ⟦-⟧ᵇ-bracket-ƛ (done t) e = refl
+  ⟦-⟧ᵇ-bracket-ƛ top e = refl
+  ⟦-⟧ᵇ-bracket-ƛ (use-top t) e = refl
+  ⟦-⟧ᵇ-bracket-ƛ (ignore-top t) e = ⟦-⟧ᵇ-$$ (done K) t e
 
-  open import Axiom.Extensionality.Propositional using ( Extensionality )
+  open import Axiom.Extensionality.Propositional
 
+  -- How to get rid of this assumption?
   module _ (funExt : Extensionality _ _) where
 
-    ⟦-⟧ᶜ-bracket′ : ∀ (t : Term Γ α) e → ⟦ bracket′ t ⟧ᶜ e ≡ ⟦ t ⟧′ e
-    ⟦-⟧ᶜ-bracket′ tt e = refl
-    ⟦-⟧ᶜ-bracket′ (var i) e = ⟦-⟧ᶜ-bracket-var i e
-    ⟦-⟧ᶜ-bracket′ (ƛ t) e = funExt λ x → begin
-      ⟦ bracket-ƛ (bracket′ t) ⟧ᶜ e x  ≡⟨ ⟦-⟧ᶜ-bracket-ƛ (bracket′ t) e x ⟩
-      ⟦ bracket′ t ⟧ᶜ (e , x)          ≡⟨ ⟦-⟧ᶜ-bracket′ t (e , x) ⟩
-      ⟦ t ⟧′ (e , x)                   ∎
-    ⟦-⟧ᶜ-bracket′ (t · s) e = begin
-      ⟦ bracket′ t $$ bracket′ s ⟧ᶜ e        ≡⟨ ⟦-⟧ᶜ-$$-dist (bracket′ t) (bracket′ s) e ⟩
-      ⟦ bracket′ t ⟧ᶜ e (⟦ bracket′ s ⟧ᶜ e)  ≡⟨ cong₂ _$_ (⟦-⟧ᶜ-bracket′ t e) (⟦-⟧ᶜ-bracket′ s e) ⟩
-      ⟦ t ⟧′ e (⟦ s ⟧′ e)                    ∎
+    ⟦-⟧ᵇ-bracket′ : ∀ (t : Term Γ α) e → ⟦ bracket′ t ⟧ᵇ e ≡ ⟦ t ⟧′ e
+    ⟦-⟧ᵇ-bracket′ tt e = erefl tt
+    ⟦-⟧ᵇ-bracket′ (var i) e = ⟦-⟧ᵇ-bracket-var i e
+    ⟦-⟧ᵇ-bracket′ (ƛ t) e = begin
+        ⟦ bracket-ƛ (bracket′ t) ⟧ᵇ e
+      ≡⟨ ⟦-⟧ᵇ-bracket-ƛ (bracket′ t) e ⟩
+        (λ x → ⟦ bracket′ t ⟧ᵇ (e , x))
+      ≡⟨ funExt (λ x → ⟦-⟧ᵇ-bracket′ t (e , x)) ⟩
+        (λ x → ⟦ t ⟧′ (e , x))
+      ∎
+    ⟦-⟧ᵇ-bracket′ (t · s) e = begin
+        ⟦ bracket′ t $$ bracket′ s ⟧ᵇ e
+      ≡⟨ ⟦-⟧ᵇ-$$ (bracket′ t) (bracket′ s) e ⟩
+        ⟦ bracket′ t ⟧ᵇ e (⟦ bracket′ s ⟧ᵇ e)
+      ≡⟨ cong₂ _$_ (⟦-⟧ᵇ-bracket′ t e) (⟦-⟧ᵇ-bracket′ s e) ⟩
+        ⟦ t ⟧′ e (⟦ s ⟧′ e)
+      ∎
 
     ⟦-⟧ˢ-bracket : ∀ (t : Term ∙ α) → ⟦ bracket t ⟧ˢ ≡ ⟦ t ⟧
-    ⟦-⟧ˢ-bracket t with bracket′ t | ⟦-⟧ᶜ-bracket′ t ∙
-    ... | done s | eq = eq
+    ⟦-⟧ˢ-bracket t with done s ← bracket′ t | eq ← ⟦-⟧ᵇ-bracket′ t ∙ = eq
+
+    bracket⁻-bracket : ∀ (t : Term ∙ α) → ⟦ bracket⁻ (bracket t) ⟧ ≡ ⟦ t ⟧
+    bracket⁻-bracket t = trans (⟦-⟧-bracket⁻ (bracket t)) (⟦-⟧ˢ-bracket t)
 
 --------------------------------------------------------------------------------
 
-_ : bracket {α `→ α} (ƛ # 0) ≡ I
+_ : bracket (`id {α}) ≡ I
 _ = refl
 
-_ : bracket {α `→ β `→ α} (ƛ ƛ # 1) ≡ K
+_ : bracket (`const {α} {β}) ≡ K
 _ = refl
 
-_ : bracket {(α `→ β `→ γ) `→ (α `→ β) `→ α `→ γ} (ƛ ƛ ƛ # 2 · # 0 · (# 1 · # 0)) ≡ S
+_ : bracket (`ap {α} {β} {γ}) ≡ S
 _ = refl
 
-_ : bracket {(β `→ γ) `→ (α `→ β) `→ α `→ γ} (ƛ ƛ ƛ # 2 · (# 1 · # 0)) ≡ B
+_ : bracket (`compose {α} {β} {γ}) ≡ B
 _ = refl
 
-_ : bracket {(α `→ β `→ γ) `→ β `→ α `→ γ} (ƛ ƛ ƛ # 2 · # 0 · # 1) ≡ C
+_ : bracket (`flip {α} {β} {γ}) ≡ C
 _ = refl
 
-church′ : ℕ → Term (∙ , α `→ α , α) α
-church′ zero = # 0
-church′ (suc n) = # 1 · (church′ n)
+church : ℕ → Term Γ ((α ⇒ α) ⇒ α ⇒ α)
+church zero = ƛ ƛ # 0
+church (suc n) = ƛ ƛ # 1 · (church n · # 1 · # 0)
 
-church : ℕ → Term ∙ ((α `→ α) `→ α `→ α)
-church n = ƛ ƛ church′ n
-
-_ : bracket {(α `→ α) `→ α `→ α} (church 0) ≡ K · I
+_ : bracket (church {α = α} 0) ≡ K · I
 _ = refl
 
-_ : bracket {(α `→ α) `→ α `→ α} (church 1) ≡ I
+_ : bracket (church {α = α} 1) ≡ S · B · (K · I)
 _ = refl
 
-_ : bracket {(α `→ α) `→ α `→ α} (church 2) ≡ S · B · I
-_ = refl
-
-_ : bracket {(α `→ α) `→ α `→ α} (church 3) ≡ S · B · (S · B · I)
-_ = refl
-
-_ : bracket {(α `→ α) `→ α `→ α} (church 4) ≡ S · B · (S · B · (S · B · I))
+_ : bracket (church {α = α} 2) ≡ S · B · (S · B · (K · I))
 _ = refl
