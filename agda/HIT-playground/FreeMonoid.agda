@@ -2,7 +2,8 @@
 
 open import Level using ( Level )
 open import Cubical.Algebra.Monoid
-open import Cubical.Data.Sigma using ( _,_ )
+open import Cubical.Data.List.Base using ( List; []; _∷_; _++_; foldr )
+open import Cubical.Data.List.Properties using ( isOfHLevelList; ++-unit-r; ++-assoc )
 open import Cubical.Foundations.Everything hiding ( assoc )
 open import Cubical.Foundations.HLevels
 
@@ -30,6 +31,8 @@ freeIsMonoid A = makeIsMonoid (trunc {A = A}) assoc εᵣ εₗ
 
 freeMonoid : ∀ (A : Type ℓ) → Monoid _
 freeMonoid A = monoid (FreeMonoid A) ε _·_ (freeIsMonoid A)
+
+--------------------------------------------------------------------------------
 
 module Elim {P : FreeMonoid A → Type ℓ'}
   (ε* : P ε)
@@ -78,7 +81,9 @@ module Rec (BType : isSet B)
   f : (m : FreeMonoid A) → B
   f = Elim.f ε* [_]* _·*_ εₗ* εᵣ* assoc* (const BType)
 
-module _ (M : Monoid ℓ') (f : A → ⟨ M ⟩) where
+--------------------------------------------------------------------------------
+
+module _ {M : Monoid ℓ'} (f : A → ⟨ M ⟩) where
   open MonoidStr (str M) renaming ( ε to ε*; _·_ to _·*_ )
 
   hom : FreeMonoid A → ⟨ M ⟩
@@ -89,6 +94,8 @@ module _ (M : Monoid ℓ') (f : A → ⟨ M ⟩) where
 
   homHom : MonoidHom (freeMonoid A) M
   homHom = hom , homIsHom
+
+--------------------------------------------------------------------------------
 
 mutual
 
@@ -142,43 +149,60 @@ mutual
     (trunc (m ·' o) (n ·' o) (cong (_·' o) p) (cong (_·' o) q))
     i j
 
-reverse : FreeMonoid A → FreeMonoid A
-reverse = Rec.f trunc ε [_] (flip _·_) εᵣ εₗ (λ m n o → sym (assoc o n m))
+--------------------------------------------------------------------------------
 
-reverse-involutive : (m : FreeMonoid A) → reverse (reverse m) ≡ m
-reverse-involutive =
-  ElimProp.f
-    (λ {m} → trunc (reverse (reverse m)) m)
-    refl
-    (λ _ → refl)
-    (λ p q → cong₂ _·_ p q)
+module _ {A : Type ℓ} (ASet : isSet A) where
 
-map :(A → B) → FreeMonoid A → FreeMonoid B
-map f = Rec.f trunc ε ([_] ∘ f) _·_ εₗ εᵣ assoc
+  FreeMonoid→List : FreeMonoid A → List A
+  FreeMonoid→List =
+    Rec.f
+      (isOfHLevelList 0 ASet)
+      []
+      (_∷ [])
+      _++_
+      (λ _ → refl)
+      ++-unit-r
+      (λ xs ys zs → sym (++-assoc xs ys zs))
 
-map-id : map (idfun A) ≡ idfun (FreeMonoid A)
-map-id = funExt $
-  ElimProp.f
-    (λ {m} → trunc (map (idfun _) m) m)
-    refl
-    (λ _ → refl)
-    (λ p q → cong₂ _·_ p q)
+  List→FreeMonoid : List A → FreeMonoid A
+  List→FreeMonoid = foldr (λ x xs → [ x ] · xs) ε
 
-map-∘ : (f : B → C) (g : A → B) → map f ∘ map g ≡ map (f ∘ g)
-map-∘ f g = funExt $
-  ElimProp.f
-    (λ {m} → trunc ((map f ∘ map g) m) (map (f ∘ g) m))
-    refl
-    (λ _ → refl)
-    (λ p q → cong₂ _·_ p q)
+  sct : section FreeMonoid→List List→FreeMonoid
+  sct [] = refl
+  sct (x ∷ xs) i = x ∷ sct xs i
 
-join : FreeMonoid (FreeMonoid A) → FreeMonoid A
-join = Rec.f trunc ε (idfun (FreeMonoid _)) _·_ εₗ εᵣ assoc
+  List→FreeMonoid-++ : ∀ (xs ys : List A)
+    → List→FreeMonoid (xs ++ ys) ≡ List→FreeMonoid xs · List→FreeMonoid ys
+  List→FreeMonoid-++ [] ys = sym (εₗ (List→FreeMonoid ys))
+  List→FreeMonoid-++ (x ∷ xs) ys =
+      [ x ] · List→FreeMonoid (xs ++ ys)
+    ≡⟨ congS ([ x ] ·_) (List→FreeMonoid-++ xs ys) ⟩
+      [ x ] · (List→FreeMonoid xs · List→FreeMonoid ys)
+    ≡⟨ assoc [ x ] (List→FreeMonoid xs) (List→FreeMonoid ys) ⟩
+      ([ x ] · List→FreeMonoid xs) · List→FreeMonoid ys
+    ∎
 
-map-pure-join : join ∘ map [_] ≡ idfun (FreeMonoid A)
-map-pure-join = funExt $
-  ElimProp.f
-    (λ {m} → trunc ((join ∘ map [_]) m) m)
-    refl
-    (λ _ → refl)
-    (λ p q → cong₂ _·_ p q)
+  rtr : retract FreeMonoid→List List→FreeMonoid
+  rtr =
+    ElimProp.f
+      (λ {m} → trunc (List→FreeMonoid (FreeMonoid→List m)) m)
+      refl
+      (λ x → εᵣ [ x ])
+      (λ {m} {n} p q →
+          List→FreeMonoid (FreeMonoid→List (m · n))
+        ≡⟨⟩
+          List→FreeMonoid (FreeMonoid→List m ++ FreeMonoid→List n)
+        ≡⟨ List→FreeMonoid-++ (FreeMonoid→List m) (FreeMonoid→List n) ⟩
+          List→FreeMonoid (FreeMonoid→List m) · List→FreeMonoid (FreeMonoid→List n)
+        ≡⟨ cong₂ _·_ p q ⟩
+          m · n
+        ∎)
+
+  FreeMonoidIsoList : Iso (FreeMonoid A) (List A)
+  FreeMonoidIsoList = iso FreeMonoid→List List→FreeMonoid sct rtr
+
+  FreeMonoid≃List : FreeMonoid A ≃ List A
+  FreeMonoid≃List = isoToEquiv FreeMonoidIsoList
+
+  FreeMonoid≡List : FreeMonoid A ≡ List A
+  FreeMonoid≡List = isoToPath FreeMonoidIsoList
