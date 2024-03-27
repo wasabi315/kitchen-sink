@@ -2,6 +2,7 @@
 
 open import Cubical.Foundations.Everything
 open import Cubical.Data.Empty using ( ⊥ )
+open import Cubical.Data.Nat.Base using ( ℕ; zero; suc )
 open import Cubical.Data.Unit.Base using ( Unit; tt )
 open import Cubical.Data.Sigma.Base using ( _×_; _,_ )
 open import Cubical.Relation.Binary.Base using ( Rel; graphRel )
@@ -24,10 +25,10 @@ postulate
   Tick : LockU
 
 ▹_ : Type ℓ → Type ℓ
-▹_ A = (@tick α : Tick) -> A
+▹_ A = (@tick @irr α : Tick) -> A  -- Note @irr!
 
 ▸_ : ▹ Type ℓ → Type ℓ
-▸ A = (@tick α : Tick) → A α
+▸ A = (@tick @irr α : Tick) → A α
 
 next : A → ▹ A
 next x _ = x
@@ -70,16 +71,6 @@ pfix' f α i = pfix f i α
 fix : (▹ A → A) → A
 fix f = f (dfix f)
 
--- Is it safe to assume irrelevance of ticks?
-postulate
-  tick-irr : ∀ (x : ▹ A) → ▸ λ α → ▸ λ β → x α ≡ x β
-
-foo : ∀ {A : Type ℓ} → Path (▹ A → ▹ ▹ A) next (map▹ next)
-foo = funExt λ x → later-ext (λ α → later-ext λ β → sym (tick-irr x α β))
-
--- tick-irr' : ∀ (x : ▹ A) →  Path (▹ ▹ A) (λ (@tick α β) → x α) (λ (@tick α β) → x β)
--- tick-irr' x = later-ext λ α → later-ext λ β → tick-irr x α β
-
 --------------------------------------------------------------------------------
 -- Colists and operations on them
 
@@ -105,11 +96,19 @@ scanl : (A → B → A) → A → Colist B → Colist A
 scanl f z [] = z ∷ next []
 scanl f z (x ∷ xs) = z ∷ λ α → scanl f (f z x) (xs α)
 
+countdown : ℕ → Colist ℕ
+countdown zero = []
+countdown (suc n) = n ∷ λ _ → countdown n
+
 ColistC : Type → Type₁
 ColistC A = ∀ {B : Type} (cons : A → ▹ B → B) (nil : B) → B
 
 build : ColistC A → Colist A
 build f = f _∷_ []
+
+countdownC : ℕ → ColistC ℕ
+countdownC zero cons nil = nil
+countdownC (suc n) cons nil = cons n λ _ → countdownC n cons nil
 
 --------------------------------------------------------------------------------
 -- Rewrite rules
@@ -143,7 +142,7 @@ rule-scanl f z (x ∷ xs) =
   congS (z ∷_) (later-ext λ α →
     rule-scanl f (f z x) (xs α) ∙
     congS (f z x ∷_) (later-ext λ β →
-      congS (λ ys → foldr (scanlFB f _∷_) (const []) ys (f z x)) (tick-irr xs α β)))
+      congS (λ ys → foldr (scanlFB f _∷_) (const []) ys (f z x)) (λ _ → xs α)))
 
 --------------------------------------------------------------------------------
 -- Parametricity-exploiting proof
@@ -163,22 +162,22 @@ infixr 0 _[→]_
 Πᵢ : (A : Type ℓ) (B : A → Type ℓ') → Type (ℓ-max ℓ ℓ')
 Πᵢ A B = {a : A} → B a
 
-[Π] : ∀ {A₁ A₂ B₁ B₂} →
-  ([A] : [Type ℓ ] A₁ A₂) →
-  ([B] : ∀ {a₁ a₂} → [A] a₁ a₂ → [Type ℓ' ] (B₁ a₁) (B₂ a₂)) →
-  [Type (ℓ-max ℓ ℓ') ] (Π A₁ B₁) (Π A₂ B₂)
+[Π] : ∀ {A₁ A₂ B₁ B₂}
+  → ([A] : [Type ℓ ] A₁ A₂)
+  → ([B] : ∀ {a₁ a₂} → [A] a₁ a₂ → [Type ℓ' ] (B₁ a₁) (B₂ a₂))
+  → [Type (ℓ-max ℓ ℓ') ] (Π A₁ B₁) (Π A₂ B₂)
 [Π] [A] [B] f₁ f₂ = ∀ {a₁ a₂} [a] → [B] [a] (f₁ a₁) (f₂ a₂)
 
-[Πᵢ] : ∀ {A₁ A₂ B₁ B₂} →
-  ([A] : [Type ℓ ] A₁ A₂) →
-  ([B] : ∀ {a₁ a₂} → [A] a₁ a₂ → [Type ℓ' ] (B₁ a₁) (B₂ a₂)) →
-  [Type (ℓ-max ℓ ℓ') ] (Πᵢ A₁ B₁) (Πᵢ A₂ B₂)
+[Πᵢ] : ∀ {A₁ A₂ B₁ B₂}
+  → ([A] : [Type ℓ ] A₁ A₂)
+  → ([B] : ∀ {a₁ a₂} → [A] a₁ a₂ → [Type ℓ' ] (B₁ a₁) (B₂ a₂))
+  → [Type (ℓ-max ℓ ℓ') ] (Πᵢ A₁ B₁) (Πᵢ A₂ B₂)
 [Πᵢ] [A] [B] f₁ f₂ = ∀ {a₁ a₂} [a] → [B] [a] (f₁ {a = a₁}) (f₂ {a = a₂})
 
-_[→]_ : ∀ {A₁ A₂ B₁ B₂} →
-  [Type ℓ ] A₁ A₂ →
-  [Type ℓ' ] B₁ B₂ →
-  [Type (ℓ-max ℓ ℓ') ] (A₁ → B₁) (A₂ → B₂)
+_[→]_ : ∀ {A₁ A₂ B₁ B₂}
+  → [Type ℓ ] A₁ A₂
+  → [Type ℓ' ] B₁ B₂
+  → [Type (ℓ-max ℓ ℓ') ] (A₁ → B₁) (A₂ → B₂)
 [A] [→] [B] = [Π] [A] λ _ → [B]
 
 -- I'm not sure if this is the right way to define the relation for ▸_
@@ -257,3 +256,7 @@ module [ColistC] {xs : ColistC A} ([xs] : [ColistC] (Path A) xs xs) where
     (graphRel (foldr c n))
     (λ [x] [y] → cong₂ c [x] (later-ext [y]))
     refl
+
+[countdownC] : ∀ n → [ColistC] (Path ℕ) (countdownC n) (countdownC n)
+[countdownC] zero [A] [cons] [nil] = [nil]
+[countdownC] (suc n) [A] [cons] [nil] = [cons] refl λ α → [countdownC] n [A] [cons] [nil]
