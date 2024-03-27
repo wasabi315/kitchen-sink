@@ -20,10 +20,16 @@ postulate
   Tick : LockU
 
 ▹_ : Type ℓ → Type ℓ
-▹_ A = (@tick @irr α : Tick) -> A -- Note @irr
+▹_ A = (@tick @irr α : Tick) -> A -- Note @irr!
 
 ▸_ : ▹ Type ℓ → Type ℓ
 ▸ A = (@tick @irr α : Tick) → A α
+
+▸-syntax : ▹ Type ℓ → Type ℓ
+▸-syntax = ▸_
+
+infix 2 ▸-syntax
+syntax ▸-syntax (λ α → A) = ▸[ α ] A
 
 next : A → ▹ A
 next x _ = x
@@ -60,20 +66,44 @@ postulate
   dfix : (▹ A → A) → ▹ A
   pfix : (f : ▹ A → A) → dfix f ≡ next (f (dfix f))
 
-pfix' : (f : ▹ A → A) → ▸ λ α → dfix f α ≡ f (dfix f)
+pfix' : (f : ▹ A → A) → ▸[ α ] dfix f α ≡ f (dfix f)
 pfix' f α i = pfix f i α
 
 fix : (▹ A → A) → A
 fix f = f (dfix f)
+
+fix-path : (f : ▹ A → A) → fix f ≡ f (next (fix f))
+fix-path f i = f (pfix f i)
+
+--------------------------------------------------------------------------------
+
+-- Now tick-irr holds definitionally
+tick-irr : (x : ▹ A) → ▸[ α ] ▸[ β ] x α ≡ x β
+tick-irr x _ _ = refl
 
 --------------------------------------------------------------------------------
 
 data Stream (A : Type ℓ) : Type ℓ where
   _∷_ : (x : A) (xs : ▹ Stream A) → Stream A
 
-dup1 dup2 : Stream A → Stream A
-dup1 (x ∷ xs) = x ∷ λ α → x ∷ λ β → dup1 (xs α)
-dup2 (x ∷ xs) = x ∷ λ α → x ∷ λ β → dup2 (xs β)
+∷-syntax : A → ▹ Stream A → Stream A
+∷-syntax = _∷_
 
-dup1≡dup2 : Path (Stream A → Stream A) dup1 dup2
-dup1≡dup2 i (x ∷ xs) = x ∷ λ α → x ∷ λ _ → dup1≡dup2 i (xs α)
+infixr 5 ∷-syntax
+syntax ∷-syntax x (λ α → xs) = x ∷[ α ] xs
+
+dup1 dup2 : Stream A → Stream A
+dup1 (x ∷ xs) = x ∷[ α ] x ∷[ β ] dup1 (xs α)
+dup2 (x ∷ xs) = x ∷[ α ] x ∷[ β ] dup2 (xs β)
+
+lem1 lem2 : dup1 {A = A} ≡ dup2
+lem1 i (x ∷ xs) = x ∷[ α ] x ∷[ β ] lem1 i (xs α)
+lem2 i (x ∷ xs) = x ∷[ α ] x ∷[ β ] lem2 i (xs β)
+
+lem3 lem4 : lem1 {A = A} ≡ lem2
+lem3 i j (x ∷ xs) = x ∷[ α ] x ∷[ β ] lem3 i j (xs α)
+lem4 i j (x ∷ xs) = x ∷[ α ] x ∷[ β ] lem4 i j (xs β)
+
+lem5 lem6 : lem3 {A = A} ≡ lem4
+lem5 i j k (x ∷ xs) = x ∷[ α ] x ∷[ β ] lem5 i j k (xs α)
+lem6 i j k (x ∷ xs) = x ∷[ α ] x ∷[ β ] lem6 i j k (xs β)
