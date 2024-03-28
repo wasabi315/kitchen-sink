@@ -30,6 +30,12 @@ postulate
 ▸_ : ▹ Type ℓ → Type ℓ
 ▸ A = (@tick @irr α : Tick) → A α
 
+▸-syntax : ▹ Type ℓ → Type ℓ
+▸-syntax = ▸_
+
+infix 2 ▸-syntax
+syntax ▸-syntax (λ α → A) = ▸[ α ] A
+
 next : A → ▹ A
 next x _ = x
 
@@ -80,6 +86,12 @@ data Colist (A : Type) : Type where
   [] : Colist A
   _∷_ : (x : A) (xs : ▹ Colist A) → Colist A
 
+repeat : A → Colist A
+repeat x = fix (x ∷_)
+
+iter : (A → A) → A → Colist A
+iter f = fix λ iter-f▹ x → x ∷ λ α → iter-f▹ α (f x)
+
 map : (A → B) → Colist A → Colist B
 map f [] = []
 map f (x ∷ xs) = f x ∷ λ α → map f (xs α)
@@ -96,10 +108,6 @@ scanl : (A → B → A) → A → Colist B → Colist A
 scanl f z [] = z ∷ next []
 scanl f z (x ∷ xs) = z ∷ λ α → scanl f (f z x) (xs α)
 
-countdown : ℕ → Colist ℕ
-countdown zero = []
-countdown (suc n) = n ∷ λ _ → countdown n
-
 ColistC : Type → Type₁
 ColistC A = ∀ {B : Type} (cons : A → ▹ B → B) (nil : B) → B
 
@@ -109,6 +117,9 @@ build f = f _∷_ []
 countdownC : ℕ → ColistC ℕ
 countdownC zero cons nil = nil
 countdownC (suc n) cons nil = cons n λ _ → countdownC n cons nil
+
+repeatC : A → ColistC A
+repeatC x cons nil = fix (cons x)
 
 --------------------------------------------------------------------------------
 -- Rewrite rules
@@ -180,12 +191,30 @@ _[→]_ : ∀ {A₁ A₂ B₁ B₂}
   → [Type (ℓ-max ℓ ℓ') ] (A₁ → B₁) (A₂ → B₂)
 [A] [→] [B] = [Π] [A] λ _ → [B]
 
--- I'm not sure if this is the right way to define the relation for ▸_
 [▸]_ : ∀ {A₁ A₂} → ([A]▹ : ▸ λ α → [Type ℓ ] (A₁ α) (A₂ α)) → [Type ℓ ] (▸ A₁) (▸ A₂)
 ([▸] [A]▹) x₁ x₂ = ▸ λ α → [A]▹ α (x₁ α) (x₂ α)
 
 [▹]_ : ∀ {A₁ A₂} → [Type ℓ ] A₁ A₂ → [Type ℓ ] (▹ A₁) (▹ A₂)
 [▹] [A] = [▸] λ _ → [A]
+
+Dfix : ∀ {ℓ} → Type (ℓ-suc ℓ)
+Dfix {ℓ} = Πᵢ (Type ℓ) λ A → (▹ A → A) → ▹ A
+
+[Dfix] : ∀ {ℓ} → [Type (ℓ-suc ℓ) ] Dfix Dfix
+[Dfix] {ℓ} = [Πᵢ] [Type ℓ ] λ [A] → ([▹] [A] [→] [A]) [→] [▹] [A]
+
+postulate
+  -- IS THIS SAFE?
+  [dfix] : ∀ {ℓ} → [Dfix] {ℓ} dfix dfix
+
+Fix : ∀ {ℓ} → Type (ℓ-suc ℓ)
+Fix {ℓ} = Πᵢ (Type ℓ) λ A → (▹ A → A) → A
+
+[Fix] : ∀ {ℓ} → [Type (ℓ-suc ℓ) ] Fix Fix
+[Fix] {ℓ} = [Πᵢ] [Type ℓ ] λ [A] → ([▹] [A] [→] [A]) [→] [A]
+
+[fix] : ∀ {ℓ} → [Fix] {ℓ} fix fix
+[fix] [A] [f] = [f] ([dfix] [A] [f])
 
 --------------------------------------------------------------------------------
 
@@ -260,3 +289,12 @@ module [ColistC] {xs : ColistC A} ([xs] : [ColistC] (Path A) xs xs) where
 [countdownC] : ∀ n → [ColistC] (Path ℕ) (countdownC n) (countdownC n)
 [countdownC] zero [A] [cons] [nil] = [nil]
 [countdownC] (suc n) [A] [cons] [nil] = [cons] refl λ α → [countdownC] n [A] [cons] [nil]
+
+RepeatC : Type₁
+RepeatC = Πᵢ Type λ A → A → ColistC A
+
+[RepeatC] : [Type₁] RepeatC RepeatC
+[RepeatC] = [Πᵢ] [Type] λ [A] → [A] [→] [ColistC] [A]
+
+[repeatC] : [RepeatC] repeatC repeatC
+[repeatC] [A] [x] [B] [cons] [nil] = [fix] [B] ([cons] [x])
