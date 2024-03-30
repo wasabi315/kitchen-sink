@@ -1,5 +1,7 @@
 {-# OPTIONS --cubical --safe #-}
 
+module FreeMonoid where
+
 open import Level using ( Level )
 open import Cubical.Algebra.Monoid
 open import Cubical.Data.List.Base using ( List; []; _∷_; _++_; foldr )
@@ -54,7 +56,8 @@ module Elim {P : FreeMonoid A → Type ℓ'}
   f (εₗ m i) = εₗ* (f m) i
   f (εᵣ m i) = εᵣ* (f m) i
   f (assoc m n o i) = assoc* (f m) (f n) (f o) i
-  f (trunc m n p q i j) = isOfHLevel→isOfHLevelDep 2 trunc* (f m) (f n) (cong f p) (cong f q) (trunc m n p q) i j
+  f (trunc m n p q i j) =
+    isOfHLevel→isOfHLevelDep 2 trunc* (f m) (f n) (cong f p) (cong f q) (trunc m n p q) i j
 
 module ElimProp {P : FreeMonoid A → Type ℓ'} (PProp : ∀ {m} → isProp (P m))
   (ε* : P ε)

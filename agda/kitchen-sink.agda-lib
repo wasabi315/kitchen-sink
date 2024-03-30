@@ -1,0 +1,5 @@
+name: kitchen-sink
+include: .
+depend:
+  standard-library-2.0
+  cubical-0.7

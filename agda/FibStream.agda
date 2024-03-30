@@ -1,5 +1,7 @@
 {-# OPTIONS --sized-types #-}
 
+module FibStream where
+
 open import Size
 open import Codata.Sized.Stream
 open import Codata.Sized.Thunk

@@ -1,4 +1,4 @@
-module list-fusion where
+module ListFusion where
 
 open import Level
 open import Function using ( _∘_; const )

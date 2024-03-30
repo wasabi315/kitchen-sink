@@ -1,5 +1,7 @@
 -- Ref: https://okmij.org/ftp/tagless-final/ski.pdf
 
+module BracketAbs where
+
 open import Data.Unit.Base using ( ⊤; tt )
 open import Data.Nat using ( ℕ; zero; suc; _<_; _≤?_; z≤n; s≤s )
 open import Function.Base using ( id; const; flip; _∘′_; _ˢ_; _$_ )
