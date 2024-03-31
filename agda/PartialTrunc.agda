@@ -113,21 +113,21 @@ cons-inj₂ p = cong tail▹ p
 ¬⊥≡[] {ℓ} {A} p = lower (subst (λ xs → ⟨ P xs ⟩) p tt*)
   where
     P : Colist⊥ A → hProp ℓ
-    P [] = Empty* , isPropEmpty*
-    P ⊥ = Unit* , isPropUnit*
-    P (_ ∷ _) = Unit* , isPropUnit*
-    P (⊥-⊥ x i) = Unit* , isPropUnit*
-    P (trunc xs ys p q i j) = isSetHProp _ _ (cong P p) (cong P q) i j
+    P = Rec.f isSetHProp
+      (Empty* , isPropEmpty*)
+      (Unit* , isPropUnit*)
+      (λ _ _ → Unit* , isPropUnit*)
+      (λ _ → refl)
 
 ¬cons≡[] : ∀ {x : A} {xs} → ¬ x ∷ xs ≡ []
 ¬cons≡[] {ℓ} {A} p = lower (subst (λ xs → ⟨ P xs ⟩) p tt*)
   where
     P : Colist⊥ A → hProp ℓ
-    P [] = Empty* , isPropEmpty*
-    P ⊥ = Unit* , isPropUnit*
-    P (_ ∷ _) = Unit* , isPropUnit*
-    P (⊥-⊥ x i) = Unit* , isPropUnit*
-    P (trunc xs ys p q i j) = isSetHProp _ _ (cong P p) (cong P q) i j
+    P = Rec.f isSetHProp
+      (Empty* , isPropEmpty*)
+      (Unit* , isPropUnit*)
+      (λ _ _ → Unit* , isPropUnit*)
+      (λ _ → refl)
 
 ¬fromList≡[] : {xs : List A} → ¬ fromList⊥ xs ≡ []
 ¬fromList≡[] {xs = []} p = ¬⊥≡[] p
