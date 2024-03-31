@@ -23,7 +23,7 @@ infixr 5 _∷_
 data Colist⊥ (A : Type ℓ) : Type ℓ where
   [] ⊥ : Colist⊥ A
   _∷_ : (x : A) (xs : ▹ Colist⊥ A) → Colist⊥ A
-  -- All Colist⊥ that eventually ⊥ are equal to ⊥
+  -- All Colist⊥s that eventually ⊥ are path equal to ⊥
   -- In other words, we are only interested in Colist⊥s that does not ⊥
   ⊥-⊥ : ∀ x → x ∷ next ⊥ ≡ ⊥
   trunc : isSet (Colist⊥ A)
@@ -42,15 +42,15 @@ tail▹ (trunc xs ys p q i j) α =
 repeat : A → Colist⊥ A
 repeat x = fix (x ∷_)
 
-repeat-unfold : ∀ {x : A} → repeat x ≡ x ∷ next (repeat x)
+repeat-unfold : {x : A} → repeat x ≡ x ∷ next (repeat x)
 repeat-unfold = fix-path (_ ∷_)
 
 fromList⊥ : List A → Colist⊥ A
 fromList⊥ [] = ⊥
 fromList⊥ (x ∷ xs) = x ∷ next (fromList⊥ xs)
 
-cons-inj₂ : ∀ {x xs y ys} → Path (Colist⊥ A) (x ∷ xs) (y ∷ ys) → xs ≡ ys
-cons-inj₂ p i α = tail▹ (p i) α
+cons-inj₂ : ∀ {x y : A} {xs ys} → x ∷ xs ≡ y ∷ ys → xs ≡ ys
+cons-inj₂ p = cong tail▹ p
 
 ¬⊥≡[] : ¬ Path (Colist⊥ A) ⊥ []
 ¬⊥≡[] {ℓ} {A} p = lower (subst (λ xs → ⟨ P xs ⟩) p tt*)
@@ -62,7 +62,7 @@ cons-inj₂ p i α = tail▹ (p i) α
     P (⊥-⊥ x i) = Unit* , isPropUnit*
     P (trunc xs ys p q i j) = isSetHProp _ _ (cong P p) (cong P q) i j
 
-¬cons≡[] : ∀ {x xs} → ¬ Path (Colist⊥ A) (x ∷ xs) []
+¬cons≡[] : ∀ {x : A} {xs} → ¬ x ∷ xs ≡ []
 ¬cons≡[] {ℓ} {A} p = lower (subst (λ xs → ⟨ P xs ⟩) p tt*)
   where
     P : Colist⊥ A → hProp ℓ
@@ -72,14 +72,14 @@ cons-inj₂ p i α = tail▹ (p i) α
     P (⊥-⊥ x i) = Unit* , isPropUnit*
     P (trunc xs ys p q i j) = isSetHProp _ _ (cong P p) (cong P q) i j
 
-¬fromList≡[] : ∀ {xs : List A} → ¬ fromList⊥ xs ≡ []
+¬fromList≡[] : {xs : List A} → ¬ fromList⊥ xs ≡ []
 ¬fromList≡[] {xs = []} p = ¬⊥≡[] p
 ¬fromList≡[] {xs = x ∷ xs} p = ¬cons≡[] p
 
-¬[]≡repeat : ∀ {x} → ¬ Path (Colist⊥ A) [] (repeat x)
+¬[]≡repeat : {x : A} → ¬ [] ≡ repeat x
 ¬[]≡repeat p = {!   !}
 
-¬fromList⊥≡repeat : ∀ {x xs} → ¬ Path (Colist⊥ A) (fromList⊥ xs) (repeat x)
+¬fromList⊥≡repeat : ∀ {x : A} {xs} → ¬ fromList⊥ xs ≡ repeat x
 ¬fromList⊥≡repeat p = {!   !}
 
 --------------------------------------------------------------------------------
@@ -111,8 +111,7 @@ Eventually⊥→⊥ {xs = ⊥-⊥ x i} p = lUnit (⊥-⊥-path i) (~ i)
 Eventually⊥→⊥ {xs = trunc xs ys p q i j} =
   isOfHLevel→isOfHLevelDep 2
     (λ xs → isProp→isSet (isProp→ {A = Eventually⊥ xs} (trunc xs ⊥)))
-    (Eventually⊥→⊥ {xs = xs})
-    (Eventually⊥→⊥ {xs = ys})
+    _ _
     (cong (λ xs → Eventually⊥→⊥ {xs = xs}) p)
     (cong (λ xs → Eventually⊥→⊥ {xs = xs}) q)
     (trunc xs ys p q)
