@@ -13,7 +13,7 @@ open import LaterPrims
 
 private
   variable
-    ℓ ℓ' : Level
+    ℓ : Level
     A B : Type ℓ
 
 --------------------------------------------------------------------------------
@@ -117,7 +117,7 @@ cons-inj₂ p = cong tail▹ p
       (Empty* , isPropEmpty*)
       (Unit* , isPropUnit*)
       (λ _ _ → Unit* , isPropUnit*)
-      (λ _ → refl)
+      (const refl)
 
 ¬cons≡[] : ∀ {x : A} {xs} → ¬ x ∷ xs ≡ []
 ¬cons≡[] {ℓ} {A} p = lower (subst (λ xs → ⟨ P xs ⟩) p tt*)
@@ -127,17 +127,22 @@ cons-inj₂ p = cong tail▹ p
       (Empty* , isPropEmpty*)
       (Unit* , isPropUnit*)
       (λ _ _ → Unit* , isPropUnit*)
-      (λ _ → refl)
+      (const refl)
 
 ¬fromList≡[] : {xs : List A} → ¬ fromList⊥ xs ≡ []
 ¬fromList≡[] {xs = []} p = ¬⊥≡[] p
 ¬fromList≡[] {xs = x ∷ xs} p = ¬cons≡[] p
 
 ¬[]≡repeat : {x : A} → ¬ [] ≡ repeat x
-¬[]≡repeat p = {!   !}
+¬[]≡repeat p = ¬cons≡[] (sym (p ∙ repeat-unfold))
+
+-- Is this provable?
+¬⊥≡repeat : {x : A} → ¬ ⊥ ≡ repeat x
+¬⊥≡repeat = {!   !}
 
 ¬fromList⊥≡repeat : ∀ {x : A} {xs} → ¬ fromList⊥ xs ≡ repeat x
-¬fromList⊥≡repeat p = {!   !}
+¬fromList⊥≡repeat {xs = []} p = ¬⊥≡repeat p
+¬fromList⊥≡repeat {x = x} {_ ∷ xs} p = {!   !}
 
 --------------------------------------------------------------------------------
 -- Eventually ⊥
@@ -154,27 +159,27 @@ Eventually⊥-⊥ = Eventually⊥-fromList⊥ []
 ¬Eventually⊥-[] : ¬ Eventually⊥ {A = A} []
 ¬Eventually⊥-[] = ¬fromList≡[] ∘ snd
 
-Eventually⊥-tail : {x : A} {xs : ▹ Colist⊥ A}
-  → Eventually⊥ (x ∷ xs)
-  → ▸[ α ] Eventually⊥ (xs α)
-Eventually⊥-tail ([] , p) α = [] , λ i → tail▹ (p i) α
-Eventually⊥-tail (x ∷ xs , p) α = xs , λ i → tail▹ (p i) α
+Eventually⊥-tail▹ : {xs : Colist⊥ A}
+  → Eventually⊥ xs
+  → ▸[ α ] Eventually⊥ (tail▹ xs α)
+Eventually⊥-tail▹ ([] , p) α = [] , λ i → tail▹ (p i) α
+Eventually⊥-tail▹ (x ∷ xs , p) α = xs , λ i → tail▹ (p i) α
 
 Eventually⊥→⊥ : (xs : Colist⊥ A) → Eventually⊥ xs → xs ≡ ⊥
 Eventually⊥→⊥ =
   ElimProp.f (λ {xs} → isProp→ (trunc xs ⊥))
-    (λ (_ , p) → Empty.rec (¬fromList≡[] p))
-    (λ _ → refl)
+    (Empty.rec ∘ ¬fromList≡[] ∘ snd)
+    (const refl)
     (λ x {xs} p q →
-      x ∷ xs      ≡⟨ congS (x ∷_) (later-ext λ α → p α (Eventually⊥-tail q α)) ⟩
+      x ∷ xs      ≡[ i ]⟨ x ∷ (λ α → p α (Eventually⊥-tail▹ q α) i) ⟩
       x ∷ next ⊥  ≡⟨ ⊥-⊥ x ⟩
       ⊥           ∎)
 
-Thm : ∀ {xs ys : Colist⊥ A}
+thm : ∀ {xs ys : Colist⊥ A}
   → Eventually⊥ xs
   → Eventually⊥ ys
   → xs ≡ ys
-Thm p q = Eventually⊥→⊥ _ p ∙ sym (Eventually⊥→⊥ _ q)
+thm p q = Eventually⊥→⊥ _ p ∙ sym (Eventually⊥→⊥ _ q)
 
 ¬Eventually⊥-repeat : {x : A} → ¬ Eventually⊥ (repeat x)
 ¬Eventually⊥-repeat = ¬fromList⊥≡repeat ∘ snd
