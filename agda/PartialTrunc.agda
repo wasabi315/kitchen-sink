@@ -28,6 +28,9 @@ data Colist⊥ (A : Type ℓ) : Type ℓ where
   ⊥-⊥ : ∀ x → x ∷ next ⊥ ≡ ⊥
   trunc : isSet (Colist⊥ A)
 
+⊥-⊥-path : {x : A} → PathP (λ i → ⊥-⊥ x i ≡ ⊥) (⊥-⊥ x) refl
+⊥-⊥-path {x = x} i j = ⊥-⊥ x (i ∨ j)
+
 tail▹ : Colist⊥ A → ▹ Colist⊥ A
 tail▹ [] = next []
 tail▹ ⊥ = next ⊥
@@ -57,7 +60,7 @@ cons-inj₂ p i α = tail▹ (p i) α
     P ⊥ = Unit* , isPropUnit*
     P (_ ∷ _) = Unit* , isPropUnit*
     P (⊥-⊥ x i) = Unit* , isPropUnit*
-    P (trunc xs ys p q i j) = isSetHProp (P xs) (P ys) (cong P p) (cong P q) i j
+    P (trunc xs ys p q i j) = isSetHProp _ _ (cong P p) (cong P q) i j
 
 ¬cons≡[] : ∀ {x xs} → ¬ Path (Colist⊥ A) (x ∷ xs) []
 ¬cons≡[] {ℓ} {A} p = lower (subst (λ xs → ⟨ P xs ⟩) p tt*)
@@ -67,11 +70,14 @@ cons-inj₂ p i α = tail▹ (p i) α
     P ⊥ = Unit* , isPropUnit*
     P (_ ∷ _) = Unit* , isPropUnit*
     P (⊥-⊥ x i) = Unit* , isPropUnit*
-    P (trunc xs ys p q i j) = isSetHProp (P xs) (P ys) (cong P p) (cong P q) i j
+    P (trunc xs ys p q i j) = isSetHProp _ _ (cong P p) (cong P q) i j
 
 ¬fromList≡[] : ∀ {xs : List A} → ¬ fromList⊥ xs ≡ []
 ¬fromList≡[] {xs = []} p = ¬⊥≡[] p
 ¬fromList≡[] {xs = x ∷ xs} p = ¬cons≡[] p
+
+¬[]≡repeat : ∀ {x} → ¬ Path (Colist⊥ A) [] (repeat x)
+¬[]≡repeat p = {!   !}
 
 ¬fromList⊥≡repeat : ∀ {x xs} → ¬ Path (Colist⊥ A) (fromList⊥ xs) (repeat x)
 ¬fromList⊥≡repeat p = {!   !}
@@ -100,11 +106,17 @@ Eventually⊥→⊥ : {xs : Colist⊥ A} → Eventually⊥ xs → xs ≡ ⊥
 Eventually⊥→⊥ {xs = []} (ys , p) = Empty.rec (¬fromList≡[] p)
 Eventually⊥→⊥ {xs = ⊥} p = refl
 Eventually⊥→⊥ {xs = x ∷ xs} p =
-  x ∷ xs      ≡⟨ congS (x ∷_) (later-ext λ α → Eventually⊥→⊥ (Eventually⊥-tail p α)) ⟩
-  x ∷ next ⊥  ≡⟨ ⊥-⊥ x ⟩
-  ⊥           ∎
-Eventually⊥→⊥ {xs = ⊥-⊥ x i} p = {!   !}
-Eventually⊥→⊥ {xs = trunc xs ys p q i j} = {!   !}
+  congS (x ∷_) (later-ext λ α → Eventually⊥→⊥ (Eventually⊥-tail p α)) ∙ ⊥-⊥ x
+Eventually⊥→⊥ {xs = ⊥-⊥ x i} p = lUnit (⊥-⊥-path i) (~ i)
+Eventually⊥→⊥ {xs = trunc xs ys p q i j} =
+  isOfHLevel→isOfHLevelDep 2
+    (λ xs → isProp→isSet (isProp→ {A = Eventually⊥ xs} (trunc xs ⊥)))
+    (Eventually⊥→⊥ {xs = xs})
+    (Eventually⊥→⊥ {xs = ys})
+    (cong (λ xs → Eventually⊥→⊥ {xs = xs}) p)
+    (cong (λ xs → Eventually⊥→⊥ {xs = xs}) q)
+    (trunc xs ys p q)
+    i j
 
 Thm : ∀ {xs ys : Colist⊥ A}
   → Eventually⊥ xs
