@@ -43,13 +43,8 @@ module _ {x₀ : A} {y₀ : B} (f : A → B → C) where
     trunc _ _ (cong (zipWith (x ∷ xs)) q) (cong (zipWith (x ∷ xs)) q₁) k l
   zipWith (ext i) (trunc ys ys₁ q q₁ k l) =
     trunc _ _ (cong (zipWith (ext i)) q) (cong (zipWith (ext i)) q₁) k l
-  zipWith (trunc xs xs₁ p p₁ i j) [] =
-    trunc _ _ (cong (flip zipWith []) p) (cong (flip zipWith []) p₁) i j
-  zipWith (trunc xs xs₁ p p₁ i j) (y ∷ ys) =
-    trunc _ _ (cong (flip zipWith (y ∷ ys)) p) (cong (flip zipWith (y ∷ ys)) p₁) i j
-  zipWith (trunc xs xs₁ p p₁ i j) (ext k) =
-    trunc _ _ (cong (flip zipWith (ext k)) p) (cong (flip zipWith (ext k)) p₁) i j
-  zipWith (trunc xs xs₁ p p₁ i j) (trunc ys ys₁ q q₁ k l) = {!   !}
+  zipWith (trunc xs xs₁ p p₁ i j) ys =
+    trunc _ _ (cong (flip zipWith ys) p) (cong (flip zipWith ys) p₁) i j
 
 _ : zipWith _+_ (1 ∷ 2 ∷ 3 ∷ repeat 1) (4 ∷ 5 ∷ repeat 6) ≡
     5 ∷ 7 ∷ 9 ∷ repeat 7
