@@ -69,19 +69,44 @@ module Rec (BType : isSet B)
 map : (A → B) → Colist⊥ A → Colist⊥ B
 map f = Rec.f trunc [] ⊥ (λ x ys → f x ∷ ys) (λ x → ⊥-⊥ (f x))
 
-{-
+mutual
 
-One cannot zip two Colist⊥s because zip does not preserve ⊥ as in the example below:
+  {-# TERMINATING #-}
+  zip : Colist⊥ A → Colist⊥ B → Colist⊥ (A × B)
+  zip []       []       = []
+  zip []       ⊥        = ⊥
+  zip []       (y ∷ ys) = ⊥
+  zip ⊥        []       = ⊥
+  zip ⊥        ⊥        = ⊥
+  zip ⊥        (y ∷ ys) = ⊥
+  zip (x ∷ xs) []       = ⊥
+  zip (x ∷ xs) ⊥        = ⊥
+  zip (x ∷ xs) (y ∷ ys) = (x , y) ∷ λ α → zip (xs α) (ys α)
+  zip (⊥-⊥ x i) [] = ⊥
+  zip (⊥-⊥ x i) ⊥ = ⊥
+  zip [] (⊥-⊥ x k) = ⊥
+  zip ⊥ (⊥-⊥ x k) = ⊥
+  zip (x ∷ xs) (⊥-⊥ y k) =
+    (congS ((x , y) ∷_) (later-ext λ α → zip-⊥ᵣ (xs α)) ∙ ⊥-⊥ (x , y)) k
+  zip (⊥-⊥ x i) (y ∷ ys) =
+    (congS ((x , y) ∷_) (later-ext λ α → zip-⊥ₗ (ys α)) ∙ ⊥-⊥ (x , y)) i
+  zip (⊥-⊥ x i) (⊥-⊥ y k) = {!   !}
+  zip [] (trunc ys ys₁ q q₁ k l) =
+    trunc _ _ (cong (zip []) q) (cong (zip []) q₁) k l
+  zip ⊥ (trunc ys ys₁ q q₁ k l) =
+    trunc _ _ (cong (zip ⊥) q) (cong (zip ⊥) q₁) k l
+  zip (x ∷ xs) (trunc ys ys₁ q q₁ k l) =
+    trunc _ _ (cong (zip (x ∷ xs)) q) (cong (zip (x ∷ xs)) q₁) k l
+  zip (⊥-⊥ x i) (trunc ys ys₁ q q₁ k l) =
+    trunc _ _ (cong (zip (⊥-⊥ x i)) q) (cong (zip (⊥-⊥ x i)) q₁) k l
+  zip (trunc xs xs₁ p p₁ i j) ys =
+    trunc _ _ (cong (flip zip ys) p) (cong (flip zip ys) p₁) i j
 
-  zip [] (0 ∷ next ⊥) = []  -- ⊥ is lost
+  zip-⊥ₗ : (xs : Colist⊥ A) → zip {A = B} ⊥ xs ≡ ⊥
+  zip-⊥ₗ = ElimProp.f (λ {xs} → trunc (zip ⊥ xs) ⊥) refl refl (λ _ _ → refl)
 
-zip : Colist⊥ A → Colist⊥ B → Colist⊥ (A × B)
-zip [] ⊥ = ⊥
-zip [] (x ∷ xs) = []
-zip [] (⊥-⊥ x i) = {!   !} -- impossible to prove [] ≡ ⊥
-zip xs ys = {!   !}
-
--}
+  zip-⊥ᵣ : (xs : Colist⊥ A) → zip {B = B} xs ⊥ ≡ ⊥
+  zip-⊥ᵣ = ElimProp.f (λ {xs} → trunc (zip xs ⊥) ⊥) refl refl (λ _ _ → refl)
 
 tail▹ : Colist⊥ A → ▹ Colist⊥ A
 tail▹ [] = next []
