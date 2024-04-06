@@ -4,7 +4,7 @@ module PartialTrunc where
 
 open import Cubical.Foundations.Everything
 open import Cubical.Data.List using ( List; []; _∷_ )
-open import Cubical.Data.Empty as Empty using () renaming ( ⊥* to Empty*; isProp⊥* to isPropEmpty* )
+open import Cubical.Data.Empty as Empty using () renaming ( ⊥ to Empty; ⊥* to Empty*; isProp⊥* to isPropEmpty* )
 open import Cubical.Data.Unit using ( Unit*; tt*; isPropUnit* )
 open import Cubical.Data.Sigma using ( _×_; _,_ )
 open import Cubical.Relation.Nullary using ( ¬_ )
@@ -90,7 +90,8 @@ mutual
     (congS ((x , y) ∷_) (later-ext λ α → zip-⊥ᵣ (xs α)) ∙ ⊥-⊥ (x , y)) k
   zip (⊥-⊥ x i) (y ∷ ys) =
     (congS ((x , y) ∷_) (later-ext λ α → zip-⊥ₗ (ys α)) ∙ ⊥-⊥ (x , y)) i
-  zip (⊥-⊥ x i) (⊥-⊥ y k) = {!   !}
+  zip (⊥-⊥ x i) (⊥-⊥ y k) =
+    (congS ((x , y) ∷_) (later-ext λ _ → refl) ∙ ⊥-⊥ (x , y)) (i ∨ k)
   zip [] (trunc ys ys₁ q q₁ k l) =
     trunc _ _ (cong (zip []) q) (cong (zip []) q₁) k l
   zip ⊥ (trunc ys ys₁ q q₁ k l) =
@@ -102,10 +103,10 @@ mutual
   zip (trunc xs xs₁ p p₁ i j) ys =
     trunc _ _ (cong (flip zip ys) p) (cong (flip zip ys) p₁) i j
 
-  zip-⊥ₗ : (xs : Colist⊥ A) → zip {A = B} ⊥ xs ≡ ⊥
+  zip-⊥ₗ : (xs : Colist⊥ A) → Path (Colist⊥ (B × A)) (zip ⊥ xs) ⊥
   zip-⊥ₗ = ElimProp.f (λ {xs} → trunc (zip ⊥ xs) ⊥) refl refl (λ _ _ → refl)
 
-  zip-⊥ᵣ : (xs : Colist⊥ A) → zip {B = B} xs ⊥ ≡ ⊥
+  zip-⊥ᵣ : (xs : Colist⊥ A) → Path (Colist⊥ (A × B)) (zip xs ⊥) ⊥
   zip-⊥ᵣ = ElimProp.f (λ {xs} → trunc (zip xs ⊥) ⊥) refl refl (λ _ _ → refl)
 
 tail▹ : Colist⊥ A → ▹ Colist⊥ A
