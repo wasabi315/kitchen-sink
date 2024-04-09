@@ -1,0 +1,9 @@
+(env
+ (dev
+  (flags
+   (:standard -warn-error -A))))
+
+(executable
+ (name main)
+ (libraries core)
+ (preprocess (pps ppx_jane)))
