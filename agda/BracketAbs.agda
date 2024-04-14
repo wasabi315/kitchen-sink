@@ -2,9 +2,10 @@
 
 module BracketAbs where
 
-open import Data.Unit.Base using ( ⊤; tt )
+open import Data.Empty using ( ⊥ )
 open import Data.Nat using ( ℕ; zero; suc; _<_; _≤?_; z≤n; s≤s )
 open import Function.Base using ( id; const; flip; _∘′_; _ˢ_; _$_ )
+open import Function.Definitions using ( Injective )
 open import Relation.Binary.PropositionalEquality
 open import Relation.Nullary.Decidable using ( True; toWitness )
 
@@ -23,7 +24,7 @@ infixr 7 _⇒_
 infixl 5 _,_
 
 data Ty : Set where
-  `⊤ : Ty
+  ι : Ty
   _⇒_ : (α β : Ty) → Ty
 
 data Ctx : Set where
@@ -48,7 +49,6 @@ data _∋_ : Ctx → Ty → Set where
   suc : Γ ∋ α → Γ , β ∋ α
 
 data Term : Ctx → Ty → Set where
-  tt : Term Γ `⊤
   var : Γ ∋ α → Term Γ α
   ƛ_ : (t : Term (Γ , α) β) → Term Γ (α ⇒ β)
   _·_ : (t : Term Γ (α ⇒ β)) (s : Term Γ α) → Term Γ β
@@ -86,7 +86,7 @@ lookupCtx {Γ , α} {suc n} (s≤s p) = lookupCtx p
 -- Evaluation
 
 ⟦_⟧ᵗ : Ty → Set
-⟦ `⊤ ⟧ᵗ = ⊤
+⟦ ι ⟧ᵗ = ⊥
 ⟦ α ⇒ β ⟧ᵗ = ⟦ α ⟧ᵗ → ⟦ β ⟧ᵗ
 
 data ⟦_⟧ᶜ : Ctx → Set where
@@ -98,7 +98,6 @@ lookup (e , x) zero = x
 lookup (e , _) (suc i) = lookup e i
 
 ⟦_⟧′ : Term Γ α → ⟦ Γ ⟧ᶜ → ⟦ α ⟧ᵗ
-⟦ tt ⟧′ e = tt
 ⟦ var i ⟧′ e = lookup e i
 ⟦ ƛ t ⟧′ e x = ⟦ t ⟧′ (e , x)
 ⟦ t · s ⟧′ e = ⟦ t ⟧′ e (⟦ s ⟧′ e)
@@ -110,7 +109,6 @@ lookup (e , _) (suc i) = lookup e i
 -- Combinators
 
 data SKI : Ty → Set where
-  tt : SKI `⊤
   I : SKI (α ⇒ α)
   K : SKI (α ⇒ β ⇒ α)
   S : SKI ((α ⇒ β ⇒ γ) ⇒ (α ⇒ β) ⇒ α ⇒ γ)
@@ -119,13 +117,22 @@ data SKI : Ty → Set where
   _·_ : (t : SKI (α ⇒ β)) (s : SKI α) → SKI β
 
 ⟦_⟧ˢ : SKI α → ⟦ α ⟧ᵗ
-⟦ tt ⟧ˢ = tt
 ⟦ I ⟧ˢ = id
 ⟦ K ⟧ˢ = const
 ⟦ S ⟧ˢ = _ˢ_
 ⟦ B ⟧ˢ = _∘′_
 ⟦ C ⟧ˢ = flip
 ⟦ t · s ⟧ˢ = ⟦ t ⟧ˢ ⟦ s ⟧ˢ
+
+·-injective₁ : {t : SKI (α ⇒ β)} {s : SKI α} {t′ : SKI (α ⇒ β)} {s′ : SKI α}
+  → t · s ≡ t′ · s′
+  → t ≡ t′
+·-injective₁ refl = refl
+
+·-injective₂ : ∀ {t : SKI (α ⇒ β)} {s : SKI α} {t′ : SKI (α ⇒ β)} {s′ : SKI α}
+  → t · s ≡ t′ · s′
+  → s ≡ s′
+·-injective₂ refl = refl
 
 --------------------------------------------------------------------------------
 -- Bracket abstraction
@@ -176,7 +183,6 @@ bracket-ƛ (use-top t) = t
 bracket-ƛ (ignore-top t) = done K $$ t
 
 bracket′ : Term Γ α → BTerm Γ α
-bracket′ tt = done tt
 bracket′ (var i) = bracket-var i
 bracket′ (ƛ t) = bracket-ƛ (bracket′ t)
 bracket′ (t · s) = bracket′ t $$ bracket′ s
@@ -186,7 +192,6 @@ bracket : Term ∙ α → SKI α
 bracket t with done s ← bracket′ t = s
 
 bracket⁻ : SKI α → Term ∙ α
-bracket⁻ tt = tt
 bracket⁻ I = `id
 bracket⁻ K = `const
 bracket⁻ S = `ap
@@ -198,7 +203,6 @@ bracket⁻ (t · s) = bracket⁻ t · bracket⁻ s
 -- Bracket abstraction preserves the semantics
 
 ⟦-⟧-bracket⁻ : ∀ (t : SKI α) → ⟦ bracket⁻ t ⟧ ≡ ⟦ t ⟧ˢ
-⟦-⟧-bracket⁻ tt = refl
 ⟦-⟧-bracket⁻ I = refl
 ⟦-⟧-bracket⁻ K = refl
 ⟦-⟧-bracket⁻ S = refl
@@ -211,13 +215,13 @@ module _ where
 
   ⟦-⟧ᵇ-$$ : ∀ (t : BTerm Γ (α ⇒ β)) s e
     → ⟦ t $$ s ⟧ᵇ e ≡ ⟦ t ⟧ᵇ e (⟦ s ⟧ᵇ e)
-  ⟦-⟧ᵇ-$$ (done t) (done s) e = erefl (⟦ t ⟧ˢ ⟦ s ⟧ˢ)
-  ⟦-⟧ᵇ-$$ (done t) top (e , x) = erefl (⟦ t ⟧ˢ x)
+  ⟦-⟧ᵇ-$$ (done t) (done s) e = refl
+  ⟦-⟧ᵇ-$$ (done t) top (e , x) = refl
   ⟦-⟧ᵇ-$$ (done t) (use-top s) (e , x) =
     cong-app (⟦-⟧ᵇ-$$ (done (B · t)) s e) x
   ⟦-⟧ᵇ-$$ (done t) (ignore-top s) (e , x) =
     ⟦-⟧ᵇ-$$ (done t) s e
-  ⟦-⟧ᵇ-$$ top (done t) (e , x) = erefl (x ⟦ t ⟧ˢ)
+  ⟦-⟧ᵇ-$$ top (done t) (e , x) = refl
   ⟦-⟧ᵇ-$$ top (use-top s) (e , x) =
     cong-app (⟦-⟧ᵇ-$$ (done (S · I)) s e) x
   ⟦-⟧ᵇ-$$ top (ignore-top s) (e , x) =
@@ -247,7 +251,7 @@ module _ where
     ∎
   ⟦-⟧ᵇ-$$ (ignore-top t) (done s) (e , x) =
     ⟦-⟧ᵇ-$$ t (done s) e
-  ⟦-⟧ᵇ-$$ (ignore-top t) top (e , x) = erefl (⟦ t ⟧ᵇ e x)
+  ⟦-⟧ᵇ-$$ (ignore-top t) top (e , x) = refl
   ⟦-⟧ᵇ-$$ (ignore-top t) (use-top s) (e , x) = begin
       ⟦ done B $$ t $$ s ⟧ᵇ e x
     ≡⟨ cong-app (⟦-⟧ᵇ-$$ (done B $$ t) s e) x ⟩
@@ -266,7 +270,7 @@ module _ where
     → ⟦ bracket-ƛ t ⟧ᵇ e ≡ (λ x → ⟦ t ⟧ᵇ (e , x))
   ⟦-⟧ᵇ-bracket-ƛ (done t) e = refl
   ⟦-⟧ᵇ-bracket-ƛ top e = refl
-  ⟦-⟧ᵇ-bracket-ƛ (use-top t) e = refl
+  ⟦-⟧ᵇ-bracket-ƛ (use-top t) e =  refl
   ⟦-⟧ᵇ-bracket-ƛ (ignore-top t) e = ⟦-⟧ᵇ-$$ (done K) t e
 
   open import Axiom.Extensionality.Propositional
@@ -275,7 +279,6 @@ module _ where
   module _ (funExt : Extensionality _ _) where
 
     ⟦-⟧ᵇ-bracket′ : ∀ (t : Term Γ α) e → ⟦ bracket′ t ⟧ᵇ e ≡ ⟦ t ⟧′ e
-    ⟦-⟧ᵇ-bracket′ tt e = erefl tt
     ⟦-⟧ᵇ-bracket′ (var i) e = ⟦-⟧ᵇ-bracket-var i e
     ⟦-⟧ᵇ-bracket′ (ƛ t) e = begin
         ⟦ bracket-ƛ (bracket′ t) ⟧ᵇ e
@@ -293,27 +296,29 @@ module _ where
       ∎
 
     ⟦-⟧ˢ-bracket : ∀ (t : Term ∙ α) → ⟦ bracket t ⟧ˢ ≡ ⟦ t ⟧
-    ⟦-⟧ˢ-bracket t with done s ← bracket′ t | eq ← ⟦-⟧ᵇ-bracket′ t ∙ = eq
+    ⟦-⟧ˢ-bracket t with bracket′ t | ⟦-⟧ᵇ-bracket′ t ∙
+    ... | done s | eq = eq
 
     bracket⁻-bracket : ∀ (t : Term ∙ α) → ⟦ bracket⁻ (bracket t) ⟧ ≡ ⟦ t ⟧
     bracket⁻-bracket t = trans (⟦-⟧-bracket⁻ (bracket t)) (⟦-⟧ˢ-bracket t)
 
 --------------------------------------------------------------------------------
+-- Stability
 
-_ : bracket (`id {α}) ≡ I
-_ = refl
+bracket′-bracket⁻ : ∀ (t : SKI α) → bracket′ (bracket⁻ t) ≡ done t
+bracket′-bracket⁻ I = refl
+bracket′-bracket⁻ K = refl
+bracket′-bracket⁻ S = refl
+bracket′-bracket⁻ B = refl
+bracket′-bracket⁻ C = refl
+bracket′-bracket⁻ (t · u)
+  rewrite bracket′-bracket⁻ t | bracket′-bracket⁻ u = refl
 
-_ : bracket (`const {α} {β}) ≡ K
-_ = refl
+bracket-bracket⁻ : ∀ (t : SKI α) → bracket (bracket⁻ t) ≡ t
+bracket-bracket⁻ t with bracket′ (bracket⁻ t) | bracket′-bracket⁻ t
+... | done .t | refl = refl
 
-_ : bracket (`ap {α} {β} {γ}) ≡ S
-_ = refl
-
-_ : bracket (`compose {α} {β} {γ}) ≡ B
-_ = refl
-
-_ : bracket (`flip {α} {β} {γ}) ≡ C
-_ = refl
+--------------------------------------------------------------------------------
 
 church : ℕ → Term Γ ((α ⇒ α) ⇒ α ⇒ α)
 church zero = ƛ ƛ # 0
