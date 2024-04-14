@@ -6,6 +6,7 @@ open import Data.Empty
 open import Data.Nat
 open import Relation.Binary.PropositionalEquality
 open import Relation.Nullary
+open import Data.Product using ( _×_ ) renaming ( _,_ to _,,_ )
 
 private
   variable
@@ -31,7 +32,7 @@ private
     Γ Δ Σ : Scope
 
 infix 4 _⊑_
-infix 5 _keep_ _drop_
+infixl 5 _keep_ _drop_
 data _⊑_ : Scope → Scope → Set where
   ∅ : ∅ ⊑ ∅
   _keep_ : (p : Γ ⊑ Δ) (α : Type) → Γ , α ⊑ Δ , α
@@ -41,13 +42,13 @@ data Cover : (p : Γ ⊑ Σ) (q : Δ ⊑ Σ) → Set where
   ∅ : Cover ∅ ∅
   _L : {p : Γ ⊑ Σ} {q : Δ ⊑ Σ}
     → Cover p q
-    → Cover (p keep α) (q drop α) -- C
+    → Cover (p keep α) (q drop α)
   _R : {p : Γ ⊑ Σ} {q : Δ ⊑ Σ}
     → Cover p q
-    → Cover (p drop α) (q keep α) -- B
+    → Cover (p drop α) (q keep α)
   _B : {p : Γ ⊑ Σ} {q : Δ ⊑ Σ}
     → Cover p q
-    → Cover (p keep α) (q keep α) -- S
+    → Cover (p keep α) (q keep α)
 
 infix 5 ƛ_ ƛ-_
 
@@ -110,55 +111,4 @@ Term⟦ ƛ t ⟧ s x = Term⟦ t ⟧ (s , x)
 Term⟦ ƛ- t ⟧ s _ = Term⟦ t ⟧ s
 Term⟦ app {p = p} {q} _ t u ⟧ s = Term⟦ t ⟧ (⊑⟦ p ⟧ s) (Term⟦ u ⟧ (⊑⟦ q ⟧ s))
 
---------------------------------------------------------------------------------
--- Bracket abstraction
--- There might be an efficient way to do bracket abstraction
--- since a term precisely knows in which subterms variables in scope are used.
--- I'm not sure how to do it in a type-preserving way yet.
-
-infixl 7 _·_
-
-data SKI : Type → Set where
-  𝕀 : SKI (α ⇒ α)
-  𝕂 : SKI (α ⇒ β ⇒ α)
-  𝕊 : SKI ((α ⇒ β ⇒ γ) ⇒ (α ⇒ β) ⇒ α ⇒ γ)
-  𝔹 : SKI ((β ⇒ γ) ⇒ (α ⇒ β) ⇒ α ⇒ γ)
-  ℂ : SKI ((α ⇒ β ⇒ γ) ⇒ β ⇒ α ⇒ γ)
-  _·_ : (t : SKI (α ⇒ β)) (u : SKI α) → SKI β
-
-data BTerm : Scope → Type → Set where
-  done : SKI α → BTerm Γ α
-  var : BTerm (∅ , α) α
-  use-top : BTerm Γ (α ⇒ β) → BTerm (Γ , α) β
-  K·_ : BTerm Γ α → BTerm Γ (β ⇒ α)
-
-bracket′ : Term Γ α → BTerm Γ α
-bracket′ var = {!   !}
-bracket′ (ƛ t) = {!   !}
-bracket′ (ƛ- t) = K· bracket′ t
-bracket′ (app x t u) = {!   !}
-
--- infixr 7 _*⇒_
--- _*⇒_ : Scope → Type → Type
--- ∅ *⇒ α = α
--- (Γ , α) *⇒ β = Γ *⇒ α ⇒ β
-
--- bracket-ƛ- : SKI (Γ *⇒ α) → SKI (Γ *⇒ β ⇒ α)
--- bracket-ƛ- {∅} t = 𝕂 · t
--- bracket-ƛ- {Γ , α} t = let t' = bracket-ƛ- {Γ} t in {!   !}
-
--- bracket-app : {p : Γ ⊑ Σ} {q : Δ ⊑ Σ}
---   → Cover p q
---   → SKI (Γ *⇒ β ⇒ γ)
---   → SKI (Δ *⇒ β)
---   → SKI (Σ *⇒ γ)
--- bracket-app ∅ t u = t · u
--- bracket-app (c L) t u = {!   !}
--- bracket-app (c R) t u = {!   !}
--- bracket-app (c B) t u = {!   !}
-
--- bracket : Term Γ α → SKI (Γ *⇒ α)
--- bracket var = 𝕀
--- bracket (ƛ t) = bracket t
--- bracket (ƛ- t) = let t' = bracket t in {!   !}
--- bracket (app c t u) = bracket-app c (bracket t) (bracket u)
+-- TODO: Bracket abstraction for lambda terms with co-de Bruijn indices?
