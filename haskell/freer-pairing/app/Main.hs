@@ -5,6 +5,7 @@
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE ViewPatterns #-}
 {-# OPTIONS_GHC -Wno-orphans #-}
 
 import Control.Comonad.Cofree
@@ -30,31 +31,43 @@ newtype ObjectF f g a = ObjectF (forall x. f x -> g (x, a))
 
 type instance Base (Object f g) = ObjectF f g
 
-instance Functor g => Recursive (Object f g) where
+instance (Functor g) => Recursive (Object f g) where
   project (Object f) = ObjectF f
 
-instance Functor g => Corecursive (Object f g) where
+instance (Functor g) => Corecursive (Object f g) where
   embed (ObjectF f) = Object f
 
--- `ObjectF f Identity` pairs with `Coyoneda f`?
+-- `ObjectF f Identity` pairs with `Coyoneda f`
 coyonedaObjectF :: Pairing (Coyoneda f) (ObjectF f Identity)
 coyonedaObjectF f (Coyoneda g m) (ObjectF n) = let Identity (x, b) = n m in f (g x) b
 
 type Freer f = Free (Coyoneda f)
 
--- `Cofree (ObjectF f Identity)` pairs with `Freer f` then?
+-- `Cofree (ObjectF f Identity)` pairs with `Freer f`
 freerCofreeObjectF :: Pairing (Freer f) (Cofree (ObjectF f Identity))
 freerCofreeObjectF = freeCofree coyonedaObjectF
 
 send :: f a -> Freer f a
 send = liftF . liftCoyoneda
 
--- Cofree (ObjectF f Identity) can be seen as a state machine whose states correspond to handlers
+-- Cofree (ObjectF f Identity) (a -> b) can be seen as a shallow handler!
 
-type Handlers f a b = Cofree (ObjectF f Identity) (a -> b)
+type Handler f a b = Cofree (ObjectF f Identity) (a -> b)
 
-pattern Handlers :: (a -> b) -> (forall x. f x -> Identity (x, Handlers f a b)) -> Handlers f a b
-pattern Handlers {valh, effh} = valh :< ObjectF effh
+pattern Handler :: (a -> b) -> (forall x. f x -> (x, Handler f a b)) -> Handler f a b
+pattern Handler {valh, effh} <- valh :< ObjectF (aux -> effh)
+  where
+    Handler vh eh = vh :< ObjectF (Identity . eh)
+
+runWith :: Handler f a b -> Freer f a -> b
+runWith h m = freerCofreeObjectF (&) m h
+
+aux ::
+  (forall x. f x -> Identity (x, Handler f a b)) ->
+  (forall x. f x -> (x, Handler f a b))
+aux f x = runIdentity (f x)
+
+--------------------------------------------------------------------------------
 
 data Amb a where
   Flip :: Amb Bool
@@ -67,11 +80,11 @@ data Amb a where
       +----+  Amb +-----+
 -}
 tf :: forall a. Freer Amb a -> a
-tf m = freerCofreeObjectF (&) m true
+tf = runWith true
   where
-    true, false :: Handlers Amb a a
-    true = Handlers {valh = id, effh = \Flip -> pure (True, false)}
-    false = Handlers {valh = id, effh = \Flip -> pure (False, true)}
+    true, false :: Handler Amb a a
+    true = Handler {valh = id, effh = \Flip -> (True, false)}
+    false = Handler {valh = id, effh = \Flip -> (False, true)}
 
 main :: IO ()
 main = print $ tf $ replicateM 10 (send Flip)
