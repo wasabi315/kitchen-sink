@@ -38,6 +38,7 @@ inh α = con (inhCon α) (inhArgs α)
 private
   variable
     α β : Ty
+    αs βs : List Ty
 
 --------------------------------------------------------------------------------
 
@@ -54,6 +55,28 @@ mutual
 
   Pat* : List Ty → Set
   Pat* = All Pat
+
+--------------------------------------------------------------------------------
+
+mutual
+  synth : Pat α → Val α
+  synth — = inh _
+  synth (con c ps) = con c (synth* ps)
+  synth (p ∣ q) = synth p
+
+  synth* : Pat* αs → Val* αs
+  synth* [] = []
+  synth* (p ∷ ps) = synth p ∷ synth* ps
+
+--------------------------------------------------------------------------------
+
+mutual
+  only : Val α → Pat α
+  only (con c vs) = con c (only* vs)
+
+  only* : Val* αs → Pat* αs
+  only* [] = []
+  only* (v ∷ vs) = only v ∷ only* vs
 
 --------------------------------------------------------------------------------
 
@@ -77,28 +100,19 @@ args (`List α) (suc zero) = α ∷ `List α ∷ []
 inhCon (`List α) = zero
 inhArgs (`List α) = []
 
-`zero : Val `ℕ
-`zero = con zero []
+-- Can be both Val and Pat
+pattern `zero = con zero []
+pattern `suc n = con (suc zero) (n ∷ [])
 
-`nil : Val (`List α)
-`nil = con zero []
+pattern _`,_ x y = con zero (x ∷ y ∷ [])
+infixr 4 _`,_
 
+pattern `[] = con zero []
+pattern _`∷_ x xs = con (suc zero) (x ∷ xs ∷ [])
 infixr 5 _`∷_
-_`∷_ : Val α → Val (`List α) → Val (`List α)
-x `∷ xs = con (suc zero) (x ∷ xs ∷ [])
 
-`zeroₚ : Pat `ℕ
-`zeroₚ = con zero []
+exVal : Val (`List `ℕ)
+exVal = `zero `∷ `suc `zero `∷ `suc (`suc `zero) `∷ `[]
 
-`sucₚ : Pat `ℕ → Pat `ℕ
-`sucₚ n = con (suc zero) (n ∷ [])
-
-`nilₚ : Pat (`List α)
-`nilₚ = con zero []
-
-infixr 5 _`∷ₚ_
-_`∷ₚ_ : Pat α → Pat (`List α) → Pat (`List α)
-x `∷ₚ xs = con (suc zero) (x ∷ xs ∷ [])
-
-_ : Pat (`List `ℕ)
-_ = `zeroₚ `∷ₚ (`sucₚ `zeroₚ) `∷ₚ (`sucₚ (`sucₚ —)) `∷ₚ —
+exPat : Pat (`List `ℕ)
+exPat = `zero `∷ (`suc `zero) `∷ (`suc (`suc —)) `∷ —

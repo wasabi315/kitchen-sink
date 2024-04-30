@@ -96,7 +96,7 @@ specialize-con {c = c} {con c' ps ∷ qs} hs | no ¬c≡c' =
 specialize-con {α} {c = c} {ps = (p ∣ q) ∷ qs} {vs} hs
   with h1 ∷ hs' ← specialize-con {ps = p ∷ qs} (++⁻ˡ (specialize c (p ∷ qs)) hs)
      | h2 ∷ _ ← specialize-con {ps = q ∷ qs} (++⁻ʳ (specialize c (p ∷ qs)) hs) =
-    (λ { (∣₁ h) → h1 h; (∣₂ h) → h2 h }) ∷ hs'
+    (λ { (h ∣-) → h1 h; (-∣ h) → h2 h }) ∷ hs'
 
 useful-specialize-con : {c : Con α} {ps : Pat* (args α c)} {qs : List (Pat α)}
   → Useful* ps (specialize c qs)
@@ -115,8 +115,8 @@ con-specialize {c = c} {con c' ps ∷ qs} (h ∷ hs) with c ≟ c'
 ... | no _ = con-specialize hs
 con-specialize {ps = (p ∣ q) ∷ ps} (h ∷ hs) =
   ++⁺
-    (con-specialize (h ∘ ∣₁ ∷ hs))
-    (con-specialize (h ∘ ∣₂ ∷ hs))
+    (con-specialize (h ∘ _∣- ∷ hs))
+    (con-specialize (h ∘ -∣_ ∷ hs))
 
 useful-con-specialize : {c : Con α} {ps : Pat* (args α c)} {qs : List (Pat α)}
   → Useful (con c ps) qs
@@ -127,14 +127,14 @@ useful-con-specialize (con _ ev₁ , ev₂) =
 useful-∣-⊎ : ∀ {p q : Pat α} {ps}
   → Useful (p ∣ q) ps
   → Useful p ps ⊎ Useful q ps
-useful-∣-⊎ (∣₁ ev₁ , ev₂) = inj₁ (ev₁ , ev₂)
-useful-∣-⊎ (∣₂ ev₁ , ev₂) = inj₂ (ev₁ , ev₂)
+useful-∣-⊎ (ev₁ ∣- , ev₂) = inj₁ (ev₁ , ev₂)
+useful-∣-⊎ (-∣ ev₁ , ev₂) = inj₂ (ev₁ , ev₂)
 
 useful-⊎-∣ : ∀ {p q : Pat α} {ps}
   → Useful p ps ⊎ Useful q ps
   → Useful (p ∣ q) ps
-useful-⊎-∣ (inj₁ (ev₁ , ev₂)) = ∣₁ ev₁ , ev₂
-useful-⊎-∣ (inj₂ (ev₁ , ev₂)) = ∣₂ ev₁ , ev₂
+useful-⊎-∣ (inj₁ (ev₁ , ev₂)) = ev₁ ∣- , ev₂
+useful-⊎-∣ (inj₂ (ev₁ , ev₂)) = -∣ ev₁ , ev₂
 
 mutual
 
