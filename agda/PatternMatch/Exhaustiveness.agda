@@ -2,25 +2,19 @@
 
 module PatternMatch.Exhaustiveness where
 
-open import Data.Bool using ( T; _∧_; _∨_; not )
 open import Data.Empty using ( ⊥-elim )
 open import Data.Fin using ( Fin; zero; suc; _≟_ )
-open import Data.List as List using ( List; _∷_; []; _++_; null; zipWith )
+open import Data.List as List using ( List; _∷_; []; _++_; zipWith )
 open import Data.List.Relation.Unary.Any using ( Any; any?; here; there )
-open import Data.List.Relation.Unary.All as All using ( All; all?; _∷_; [] )
-open import Data.List.Relation.Unary.All.Properties using ( ++⁺; ++⁻ˡ; ++⁻ʳ; All¬⇒¬Any; ¬Any⇒All¬; zipWith⁺ )
-open import Data.Nat using ( ℕ; zero; suc; _≡ᵇ_; NonZero; _⊔_; _≤_ )
-open import Data.Product using ( Σ-syntax; _×_; _,_; uncurry )
+open import Data.List.Relation.Unary.All as All using ( All; _∷_; [] )
+open import Data.List.Relation.Unary.All.Properties using ( ++⁺; ++⁻ˡ; ++⁻ʳ; All¬⇒¬Any; ¬Any⇒All¬ )
 open import Data.Sum using ( _⊎_; inj₁; inj₂ )
-open import Data.Unit using ( ⊤; tt )
-open import Data.Vec as Vec using ( Vec; _∷_; []; allFin )
-open import Data.Vec.Relation.Unary.All using ( _∷_; [] ) renaming ( all? to all′? )
-open import Function using ( _∘_ )
+open import Data.Vec.Relation.Unary.All using ( _∷_; [] )
+open import Function using ( _∘_; const )
 open import Relation.Nullary renaming ( map′ to mapDec )
-open import Relation.Binary.PropositionalEquality using ( _≡_; refl; cong )
+open import Relation.Binary.PropositionalEquality using ( _≡_; refl )
 
-open import PatternMatch.Utils
-open import PatternMatch.Syntax
+open import PatternMatch.Pattern
 open import PatternMatch.PatternMatch
 
 private
@@ -30,32 +24,24 @@ private
     αs βs γs : List Ty
 
 --------------------------------------------------------------------------------
+-- Misc.
 
-—* : Pats αs
+—* : Pat* αs
 —* {[]} = []
 —* {α ∷ αs} = — ∷ —* {αs}
 
-cons* : List (Pat α) → List (Pats αs) → List (Pats (α ∷ αs))
+—*≼ : (vs : Val* αs) → —* ≼* vs
+—*≼ [] = []
+—*≼ (v ∷ vs) = —≼ v ∷ —*≼ vs
+
+cons* : List (Pat α) → List (Pat* αs) → List (Pat* (α ∷ αs))
 cons* = zipWith _∷_
 
-uncons* : (pss : List (Pats (α ∷ αs)))
-  → Σ[ qs ∈ List (Pat α) ]
-    Σ[ qss ∈ List (Pats αs) ]
-    cons* qs qss ≡ pss
-uncons* [] = [] , [] , refl
-uncons* ((p ∷ ps) ∷ pss) =
-  let qs , qss , h = uncons* pss
-   in p ∷ qs , ps ∷ qss , cong ((p ∷ ps) ∷_) h
+head* : List (Pat* (α ∷ αs)) → List (Pat α)
+head* = List.map λ { (p ∷ _) → p }
 
-foo : ∀ {c : Ctor α} {vs : Vals (args α c)}
-  → —* ≼* vs
-  → — ≼ con {α} c vs
-foo h = —≼ con _ {!  !}
-
-bar : ∀ {c : Ctor α} {vs : Vals (args α c)}
-  → — ≼ con {α} c vs
-  → —* ≼* vs
-bar (—≼ .(con _ _)) = {!   !}
+tail* : List (Pat* (α ∷ αs)) → List (Pat* αs)
+tail* = List.map λ { (_ ∷ ps) → ps }
 
 --------------------------------------------------------------------------------
 
@@ -68,25 +54,27 @@ record Useful (p : Pat α) (ps : List (Pat α)) : Set where
     ev₁ : p ≼ v
     ev₂ : All (λ p → ¬ p ≼ v) ps
 
-record Useful* (ps : Pats αs) (pss : List (Pats αs)) : Set where
+record Useful* (ps : Pat* αs) (pss : List (Pat* αs)) : Set where
   constructor _,_
   field
-    {vs} : Vals αs
+    {vs} : Val* αs
     ev₁ : ps ≼* vs
     ev₂ : All (λ ps → ¬ ps ≼* vs) pss
 
-consUseful : ∀ {p : Pat α} {ps : Pats αs} {qs qss}
-  → Useful p qs
-  → Useful* ps qss
-  → Useful* (p ∷ ps) (cons* qs qss)
-consUseful (ev₁ , ev₂) (ev₁' , ev₂') = ev₁ ∷ ev₁' , zipWith⁺ _∷_ {!   !}
+useful*-⊎ : ∀ {p : Pat α} {ps : Pat* αs} {pss}
+  → Useful* (p ∷ ps) pss
+  → Useful p (head* pss) ⊎ Useful* ps (tail* pss)
+useful*-⊎ (_,_ {v ∷ vs} ev₁ ev₂) = {!   !}
 
-unconsUseful : ∀ {p : Pat α} {ps : Pats αs} {qs qss}
-  → Useful* (p ∷ ps) (cons* qs qss)
-  → Useful p qs × Useful* ps qss
-unconsUseful ((ev₁ ∷ ev₁') , ev₂) = (ev₁ , {!   !}) , (ev₁' , {!   !})
+useful*-⊎⁻ : ∀ {p : Pat α} {ps : Pat* αs} {pss}
+  → Useful p (head* pss) ⊎ Useful* ps (tail* pss)
+  → Useful* (p ∷ ps) pss
+useful*-⊎⁻ {ps = ps} (inj₁ (ev₁ , ev₂)) =
+  ev₁ ∷ ≼*-synth* ps , {!   !}
+useful*-⊎⁻ {p = p} (inj₂ (ev₁ , ev₂)) =
+  ≼-synth p ∷ ev₁ , {!   !}
 
-specialize : (c : Ctor α) → List (Pat α) → List (Pats (args α c))
+specialize : (c : Con α) → List (Pat α) → List (Pat* (args α c))
 specialize c [] = []
 specialize c (— ∷ ps) = —* ∷ specialize c ps
 specialize c (con c' ps ∷ qs) with c ≟ c'
@@ -94,44 +82,47 @@ specialize c (con c' ps ∷ qs) with c ≟ c'
 ... | no _ = specialize c qs
 specialize c ((p ∣ q) ∷ ps) = specialize c (p ∷ ps) ++ specialize c (q ∷ ps)
 
-useful-specialize-con-aux : ∀ {c : Ctor α} {ps : List (Pat α)} {vs}
+specialize-con : ∀ {c : Con α} {ps : List (Pat α)} {vs}
   → All (λ ps → ¬ ps ≼* vs) (specialize c ps)
   → All (λ p → ¬ p ≼ con c vs) ps
-useful-specialize-con-aux {ps = []} [] = []
-useful-specialize-con-aux {ps = — ∷ ps} (h ∷ hs) =
-  (λ { (—≼ con _ vs) → h {!   !} }) ∷ useful-specialize-con-aux hs
-useful-specialize-con-aux {c = c} {con c' ps ∷ qs} hs with c ≟ c'
-useful-specialize-con-aux {c = c} {con c ps ∷ qs} (h ∷ hs) | yes refl =
-  (λ { (con .c h') → h h' }) ∷ useful-specialize-con-aux hs
-useful-specialize-con-aux {c = c} {con c' ps ∷ qs} hs | no ¬c≡c' =
-  (λ { (con .c' _) → ¬c≡c' refl }) ∷ useful-specialize-con-aux hs
-useful-specialize-con-aux {α} {c = c} {ps = (p ∣ q) ∷ qs} {vs} hs = {!   !}
+specialize-con {ps = []} [] = []
+specialize-con {ps = — ∷ ps} (h ∷ hs) =
+  (λ { (—≼ con _ vs) → h (—*≼ vs) }) ∷ specialize-con hs
+specialize-con {c = c} {con c' ps ∷ qs} hs with c ≟ c'
+specialize-con {c = c} {con c ps ∷ qs} (h ∷ hs) | yes refl =
+  (λ { (con .c h') → h h' }) ∷ specialize-con hs
+specialize-con {c = c} {con c' ps ∷ qs} hs | no ¬c≡c' =
+  (λ { (con .c _) → ¬c≡c' refl }) ∷ specialize-con hs
+specialize-con {α} {c = c} {ps = (p ∣ q) ∷ qs} {vs} hs
+  with h1 ∷ hs' ← specialize-con {ps = p ∷ qs} (++⁻ˡ (specialize c (p ∷ qs)) hs)
+     | h2 ∷ _ ← specialize-con {ps = q ∷ qs} (++⁻ʳ (specialize c (p ∷ qs)) hs) =
+    (λ { (∣₁ h) → h1 h; (∣₂ h) → h2 h }) ∷ hs'
 
-useful-specialize-con : {c : Ctor α} {ps : Pats (args α c)} {qs : List (Pat α)}
+useful-specialize-con : {c : Con α} {ps : Pat* (args α c)} {qs : List (Pat α)}
   → Useful* ps (specialize c qs)
   → Useful (con c ps) qs
 useful-specialize-con {ps = ps} (ev₁ , ev₂) =
-  con _ ev₁ , useful-specialize-con-aux ev₂
+  con _ ev₁ , specialize-con ev₂
 
-useful-con-specialize-aux : ∀ {c : Ctor α} {ps : List (Pat α)} {vs}
+con-specialize : ∀ {c : Con α} {ps : List (Pat α)} {vs}
   → All (λ p → ¬ p ≼ con c vs) ps
   → All (λ ps → ¬ ps ≼* vs) (specialize c ps)
-useful-con-specialize-aux {ps = []} [] = []
-useful-con-specialize-aux {ps = — ∷ ps} (h ∷ hs) =
-  h ∘ foo ∷ useful-con-specialize-aux hs
-useful-con-specialize-aux {c = c} {con c' ps ∷ qs} (h ∷ hs) with c ≟ c'
-... | yes refl = (h ∘ con _) ∷ useful-con-specialize-aux hs
-... | no _ = useful-con-specialize-aux hs
-useful-con-specialize-aux {ps = (p ∣ q) ∷ ps} (h ∷ hs) =
+con-specialize {ps = []} [] = []
+con-specialize {ps = — ∷ ps} {vs} (h ∷ hs) =
+  const (h (—≼ con _ vs)) ∷ con-specialize hs
+con-specialize {c = c} {con c' ps ∷ qs} (h ∷ hs) with c ≟ c'
+... | yes refl = (h ∘ con _) ∷ con-specialize hs
+... | no _ = con-specialize hs
+con-specialize {ps = (p ∣ q) ∷ ps} (h ∷ hs) =
   ++⁺
-    (useful-con-specialize-aux (h ∘ ∣₁ ∷ hs))
-    (useful-con-specialize-aux (h ∘ ∣₂ ∷ hs))
+    (con-specialize (h ∘ ∣₁ ∷ hs))
+    (con-specialize (h ∘ ∣₂ ∷ hs))
 
-useful-con-specialize : {c : Ctor α} {ps : Pats (args α c)} {qs : List (Pat α)}
+useful-con-specialize : {c : Con α} {ps : Pat* (args α c)} {qs : List (Pat α)}
   → Useful (con c ps) qs
   → Useful* ps (specialize c qs)
 useful-con-specialize (con _ ev₁ , ev₂) =
-  ev₁ , useful-con-specialize-aux ev₂
+  ev₁ , con-specialize ev₂
 
 useful-∣-⊎ : ∀ {p q : Pat α} {ps}
   → Useful (p ∣ q) ps
@@ -160,15 +151,14 @@ mutual
       useful-∣-⊎
       (useful? p ps ⊎-dec useful? q ps)
 
-  useful*? : (ps : Pats αs) (pss : List (Pats αs)) → Dec (Useful* ps pss)
+  useful*? : (ps : Pat* αs) (pss : List (Pat* αs)) → Dec (Useful* ps pss)
   useful*? [] [] = yes ([] , [])
   useful*? [] ([] ∷ pss) = no λ { ([] , ¬[]≼[] ∷ _) → ¬[]≼[] [] }
-  useful*? (p ∷ ps) pss with uncons* pss
-  ... | qs , qss , refl =
-        mapDec
-          (uncurry consUseful)
-          unconsUseful
-          (useful? p qs ×-dec useful*? ps qss)
+  useful*? (p ∷ ps) pss =
+    mapDec
+      useful*-⊎⁻
+      useful*-⊎
+      (useful? p (head* pss) ⊎-dec useful*? ps (tail* pss))
 
 -- default : PatMat (α ∷ αs) → PatMat αs
 -- default [] = []
@@ -178,20 +168,20 @@ mutual
 --   default ((p ∷ ps) ∷ pss) ++ default ((q ∷ ps) ∷ pss)
 
 -- complete? : (pss : PatMat (α ∷ αs))
---   → Dec (⊤ ⊆ ⋃ (List.map pat-ctors (first-col pss)))
--- complete? {α} pss = ⊤ ⊆? ⋃ (List.map pat-ctors (first-col pss))
+--   → Dec (⊤ ⊆ ⋃ (List.map pat-allCon (first-col pss)))
+-- complete? {α} pss = ⊤ ⊆? ⋃ (List.map pat-allCon (first-col pss))
 
--- useful-—-default : ∀ {α} {ps : Pats αs} {pss : PatMat (α ∷ αs)}
+-- useful-—-default : ∀ {α} {ps : Pat* αs} {pss : PatMat (α ∷ αs)}
 --   → (— ∷ ps) Useful pss
 --   → ps Useful default pss
 -- useful-—-default (- ∷ ps≼vs , ¬pss≼v∷vs) = ps≼vs , lemma12 ¬pss≼v∷vs
 
--- useful-default-— : ∀ {α αs} {ps : Pats αs} {pss : PatMat (α ∷ αs)}
+-- useful-default-— : ∀ {α αs} {ps : Pat* αs} {pss : PatMat (α ∷ αs)}
 --   → ps Useful default pss
 --   → (— ∷ ps) Useful pss
 -- useful-default-— {α} (ps≼vs , ¬pss≼vs) = —≼ {!   !} ∷ ps≼vs , {!   !}
 
--- useful?-aux : (ps : Pats αs) (pss : PatMat αs) → Acc ps → Dec (ps Useful pss)
+-- useful?-aux : (ps : Pat* αs) (pss : PatMat αs) → Acc ps → Dec (ps Useful pss)
 -- useful?-aux [] [] acc = yes ([] , λ ())
 -- useful?-aux [] ([] ∷ pss) acc = no λ { ([] , ¬pss≼[]) → ¬pss≼[] (success []) }
 -- useful?-aux (_∷_ {α} — ps) pss (step-— acc acc') with complete? pss
@@ -199,7 +189,7 @@ mutual
 --       mapDec
 --         {!   !}
 --         {!   !}
---         (all′? (λ c → useful?-aux (++⁺ —* ps) (specialize c pss) acc) (ctors α))
+--         (all′? (λ c → useful?-aux (++⁺ —* ps) (specialize c pss) acc) (allCon α))
 -- ... | no _ =
 --       mapDec
 --         -- useful-default-—
@@ -217,7 +207,7 @@ mutual
 --     useful-∣-⊎
 --     (useful?-aux (p ∷ ps) pss acc ⊎-dec useful?-aux (q ∷ ps) pss acc')
 
--- _useful?_ : (ps : Pats αs) (pss : PatMat αs) → Dec (ps Useful pss)
+-- _useful?_ : (ps : Pat* αs) (pss : PatMat αs) → Dec (ps Useful pss)
 -- ps useful? pss = useful?-aux ps pss (∀Acc ps)
 
 --------------------------------------------------------------------------------
@@ -229,7 +219,9 @@ Exhaustive′ : List (Pat α) → Set
 Exhaustive′ ps = ¬ Useful — ps
 
 Exhaustive′→Exhaustive : {ps : List (Pat α)} → Exhaustive′ ps → Exhaustive ps
-Exhaustive′→Exhaustive ex v = {!   !}
+Exhaustive′→Exhaustive {ps = ps} ex v with match? v ps
+... | yes ps≼v = ps≼v
+... | no ¬ps≼v = ⊥-elim (ex (—≼ v , ¬Any⇒All¬ _ ¬ps≼v))
 
 Exhaustive→Exhaustive′ : {ps : List (Pat α)} → Exhaustive ps → Exhaustive′ ps
 Exhaustive→Exhaustive′ ex (_,_ {v} ev₁ ev₂) = All¬⇒¬Any ev₂ (ex v)

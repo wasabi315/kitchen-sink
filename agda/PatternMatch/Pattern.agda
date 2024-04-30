@@ -1,46 +1,43 @@
 {-# OPTIONS --guardedness #-}
 
-module PatternMatch.Syntax where
+module PatternMatch.Pattern where
 
-open import Data.Fin using ( Fin; zero; suc; _≟_ )
+open import Data.Fin using ( Fin; zero; suc )
 open import Data.List as List using ( List; _∷_; [] )
 open import Data.List.Relation.Unary.All using ( All; _∷_; [] )
 open import Data.Nat using ( ℕ )
 open import Data.Vec using ( allFin )
-open import Relation.Binary.PropositionalEquality using ( _≡_; refl )
-open import Relation.Nullary using ( ¬_ )
-
-open import PatternMatch.Utils
-
-private
-  variable
-    A B : Set
-
---------------------------------------------------------------------------------
-
-record Ty : Set where
-  coinductive
-  field
-    ∣_∣ᶜ : ℕ -- the number of constructors
-  Ctor = Fin ∣_∣ᶜ
-  ctors = allFin ∣_∣ᶜ
-  field
-    args : Ctor → List Ty
-
-open Ty public
-
-private
-  variable
-    α β : Ty
 
 --------------------------------------------------------------------------------
 
 mutual
-  data Val (α : Ty) : Set where
-    con : (c : Ctor α) → Vals (args α c) → Val α
+  record Ty : Set where
+    coinductive
+    field
+      numCon : ℕ
+    Con = Fin numCon
+    allCon = allFin numCon
 
-  Vals : List Ty → Set
-  Vals = All Val
+    field
+      args : Con → List Ty
+      inhCon : Con
+      inhArgs : Val* (args inhCon)
+
+  data Val (α : Ty) : Set where
+    con : (c : Ty.Con α) → Val* (Ty.args α c) → Val α
+
+  Val* : List Ty → Set
+  Val* = All Val
+
+open Ty public
+
+-- There is always at least one inhabitant
+inh : ∀ α → Val α
+inh α = con (inhCon α) (inhArgs α)
+
+private
+  variable
+    α β : Ty
 
 --------------------------------------------------------------------------------
 
@@ -51,28 +48,34 @@ mutual
     -- Wildcard
     — : Pat α
     -- Constructor pattern
-    con : (c : Ctor α) → Pats (args α c) → Pat α
+    con : (c : Con α) → Pat* (args α c) → Pat α
     -- Or pattern
     _∣_ : Pat α → Pat α → Pat α
 
-  Pats : List Ty → Set
-  Pats = All Pat
+  Pat* : List Ty → Set
+  Pat* = All Pat
 
 --------------------------------------------------------------------------------
 
-`⊥ : Ty
-∣ `⊥ ∣ᶜ = 0
-args `⊥ ()
-
 `ℕ : Ty
-∣ `ℕ ∣ᶜ = 2
+numCon `ℕ = 2
 args `ℕ zero = []
 args `ℕ (suc zero) = `ℕ ∷ []
+inhCon `ℕ = zero
+inhArgs `ℕ = []
+
+_`×_ : Ty → Ty → Ty
+numCon (α `× β) = 1
+args (α `× β) zero = α ∷ β ∷ []
+inhCon (α `× β) = zero
+inhArgs (α `× β) = inh α ∷ inh β ∷ []
 
 `List : Ty → Ty
-∣ `List α ∣ᶜ = 2
+numCon (`List α) = 2
 args (`List α) zero = []
 args (`List α) (suc zero) = α ∷ `List α ∷ []
+inhCon (`List α) = zero
+inhArgs (`List α) = []
 
 `zero : Val `ℕ
 `zero = con zero []
