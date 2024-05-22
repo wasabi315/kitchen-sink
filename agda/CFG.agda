@@ -20,7 +20,10 @@ infix 6 _label_
 data CFG (L : Set) (I : Set) (T : ℕ → Set) : Set where
   _∷_ : I → CFG L I T → CFG L I T
   term : ∀ {n} → T n → Vec L n → CFG L I T
-  _label_ : (L → CFG L I T) → (L → CFG L I T) → CFG L I T
+  _label_ :
+      (L → CFG L I T) → -- instructions before the label
+      (L → CFG L I T) → -- instructions after the label
+      CFG L I T
 
 data Tree (I : Set) (T : ℕ → Set) : Set where
   _∷_ : I → Tree I T → Tree I T
@@ -38,25 +41,43 @@ data Instr : Set where
   push : ℤ → Instr
   add store load pop : Instr
 
--- Terminator instructions
+-- Terminator instructions indexed by the number of labels they take as operands
 data Term : ℕ → Set where
   ret : Term 0
   jpz : Term 2
   jmp : Term 1
 
-pattern tret = term ret []
-pattern tjpz l1 l2 = term jpz (l1 ∷ l2 ∷ [])
-pattern tjmp l = term jmp (l ∷ [])
+pattern gret = term ret []
+pattern gjpz l1 l2 = term jpz (l1 ∷ l2 ∷ [])
+pattern gjmp l = term jmp (l ∷ [])
+pattern tret = branch ret []
+pattern tjpz t1 t2 = branch jpz (t1 ∷ t2 ∷ [])
+pattern tjmp t = branch jmp (t ∷ [])
+
+{-
+                            +----------<-----------+
+                 +---->---+ |      +--->----+      |
+    .---------.  |  . l1 -+-+---.  |  . l2 -+---.  |
+    | push 10 |  |  | load      |  |  | load    |  |
+    | store   |  ^  | jpz l3 l2 |  ^  | push -1 |  |
+    | jmp l1  |  |  '-----+--+--'  |  | add     |  |
+    '----+----'  |        v  +-->--+  | store   |  ^
+         +--->---+  . l3 -+-----.     | load    |  |
+                    | tret      |     | pop     |  |
+                    '-----------'     | jmp l1  |  |
+                                      '----+----'  |
+                                           +--->---+
+-}
 
 cfg : ∀ {L} → CFG L Instr Term
 cfg =
     push (pos 10) ∷
     store ∷
-    tjmp
+    gjmp
   label λ l1 →
   (λ l3 →
     load ∷
-    (tjpz l3)
+    (gjpz l3)
   label λ l2 →
     load ∷
     push (neg 1) ∷
@@ -64,6 +85,24 @@ cfg =
     store ∷
     load ∷
     pop ∷
-    tjmp l1)
+    gjmp l1)
   label λ l3 →
-    tret
+    gret
+
+tree : Tree Instr Term
+tree =
+  push (pos 10) ∷
+  store ∷
+  tjmp (fix λ c▹ →
+    load ∷
+    tjpz tret (
+      load ∷
+      push (neg 1) ∷
+      add ∷
+      store ∷
+      load ∷
+      pop ∷
+      tjmp (rec c▹)))
+
+_ : unlabel cfg ≡ tree
+_ = refl
