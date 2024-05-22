@@ -24,6 +24,8 @@ data CFG (L : Set) (I : Set) (T : ℕ → Set) : Set where
       (L → CFG L I T) → -- instructions before the label
       (L → CFG L I T) → -- instructions after the label
       CFG L I T
+  ∷-label-comm : (x : I) (f g : L → CFG L I T)
+    → x ∷ f label g ≡ (λ l → x ∷ f l) label g
 
 data Tree (I : Set) (T : ℕ → Set) : Set where
   _∷_ : I → Tree I T → Tree I T
@@ -34,6 +36,7 @@ unlabel : {I : Set} {T : ℕ → Set} → CFG (Tree I T) I T → Tree I T
 unlabel (x ∷ c) = x ∷ unlabel c
 unlabel (term t ls) = branch t ls
 unlabel (f label g) = unlabel $ f $ fix λ c▹ → unlabel $ g $ rec c▹
+unlabel (∷-label-comm x f g i) = x ∷ unlabel (f (fix λ c▹ → unlabel (g (rec c▹))))
 
 --------------------------------------------------------------------------------
 
