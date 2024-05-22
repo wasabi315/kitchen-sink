@@ -17,6 +17,7 @@ import GHC.TypeNats
 main = putStrLn $ pretty $ gcompile expr
 
 --------------------------------------------------------------------------------
+-- The Partial Monad
 
 data Partial a
   = Now a
@@ -55,9 +56,9 @@ infixl 6 :+
 data Expr
   = Val Int
   | Expr :+ Expr
-  | Get
-  | Put Expr Expr
-  | While Expr Expr
+  | Get -- read from the cell
+  | Put Expr Expr -- write the value of the first expr. to the cell and then evaluate the second expr.
+  | While Expr Expr -- while the first expr. is not zero, evaluate the second expr.
   deriving (Show)
 
 expr :: Expr
@@ -82,6 +83,7 @@ eval (While x y) q = do
       Later (eval (While x y) q2)
 
 --------------------------------------------------------------------------------
+-- Vector
 
 infixr 4 :>
 
@@ -94,16 +96,24 @@ deriving instance (Show a) => Show (Vec n a)
 deriving instance Functor (Vec n)
 
 --------------------------------------------------------------------------------
+-- Control Flow Graph
 
 infixr 4 `GSeq`
 
+-- l is the type of labels, t is the type of terminator instructions, i is the type of instructions
+-- t is indexed by the number of labels it can jump to
 data CFG l t i
-  = i `GSeq` CFG l t i
-  | forall n. GTerm (t n) (Vec n l)
-  | GLab (l -> CFG l t i) (l -> CFG l t i)
+  = -- cons an instruction
+    i `GSeq` CFG l t i
+  | -- terminator instruction
+    forall n. GTerm (t n) (Vec n l)
+  | -- label
+    -- the first argument is CFG before the label and the second argument is CFG after the label
+    GLab (l -> CFG l t i) (l -> CFG l t i)
 
 deriving instance Functor (CFG l t)
 
+-- Circular tree: CFG but labels are replaced by recusions
 data Tree t i
   = i `TSeq` Tree t i
   | forall n. TBranch (t n) (Vec n (Tree t i))
@@ -113,6 +123,7 @@ deriving instance Functor (Tree t)
 
 deriving instance (forall n. Show (t n), Show i) => Show (Tree t i)
 
+-- A canonical map from CFG to Tree
 unlabel :: CFG (Tree t i) t i -> Tree t i
 unlabel (i `GSeq` g) = i `TSeq` unlabel g
 unlabel (GTerm t ts) = TBranch t ts
@@ -211,14 +222,29 @@ gcomp (Val n) c = GPush n c
 gcomp (x :+ y) c = gcomp x $ gcomp y $ GAdd c
 gcomp Get c = GLoad c
 gcomp (Put x y) c = gcomp x $ GStore $ gcomp y c
+{-
+  gcomp (While x y) c ->
+      jmp l1
+    l1:
+      code for x
+      jpz l3 l2
+    l2:
+      code for y
+      pop
+      jmp l1
+    l3:
+      c
+-}
 gcomp (While x y) c =
-  GLab GJmp \l1 ->
-      do \l3 ->
-            do \l2 -> gcomp x $ GJpz l3 l2
-          `GLab`
-            do \_ -> gcomp y $ GPop $ GJmp l1
-    `GLab`
-      do \_ -> c
+    GJmp
+  `GLab`
+    \l1 ->
+        do \l3 ->
+              do \l2 -> gcomp x $ GJpz l3 l2
+            `GLab`
+              do \_ -> gcomp y $ GPop $ GJmp l1
+      `GLab`
+        \_ -> c
 
 gcompile :: Expr -> GCode l
 gcompile e = gcomp e GHalt
