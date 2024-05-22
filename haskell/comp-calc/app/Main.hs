@@ -1,5 +1,4 @@
 -- Ref: https://github.com/pa-ba/calc-graph-comp
-
 {-# LANGUAGE BlockArguments #-}
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE DeriveFunctor #-}
@@ -178,7 +177,8 @@ texec (TLoad c) (s, q) = texec c (q : s, q)
 texec (TStore c) (n : s, _) = texec c (s, n)
 texec (TPop c) (_ : s, q) = texec c (s, q)
 texec (TJmp c) conf = texec c conf
-texec (TJpz c' c) (n : s, q) = if n == 0 then texec c' (0 : s, q) else texec c (s, q)
+texec (TJpz c _) (0 : s, q) = texec c (0 : s, q)
+texec (TJpz _ c) (_ : s, q) = texec c (s, q)
 texec (TRec c) conf = Later (texec c conf)
 texec _ _ = return ([], 0)
 
@@ -213,8 +213,7 @@ gcomp Get c = GLoad c
 gcomp (Put x y) c = gcomp x $ GStore $ gcomp y c
 gcomp (While x y) c =
   GLab GJmp \l1 ->
-      do
-        \l3 ->
+      do \l3 ->
             do \l2 -> gcomp x $ GJpz l3 l2
           `GLab`
             do \_ -> gcomp y $ GPop $ GJmp l1
@@ -232,14 +231,28 @@ pretty c = evalState (go c) 0 ""
   where
     go :: GCode Int -> State Int ShowS
     go GHalt = return $ showString "  halt"
-    go (GPush n c) = go c <&> \f -> showString "  push " . shows n . showChar '\n' . f
-    go (GAdd c) = (showString "  add\n" .) <$> go c
-    go (GLoad c) = (showString "  load\n" .) <$> go c
-    go (GStore c) = (showString "  store\n" .) <$> go c
-    go (GPop c) = (showString "  pop\n" .) <$> go c
-    go (GJpz lz lnz) = return $ showString "  jpz Lbl" . shows lz . showString " Lbl" . shows lnz . showChar '\n'
-    go (GJmp l) = return (showString "  jmp Lbl" . shows l . showChar '\n')
+    go (GPush n c) = do
+      s <- go c
+      pure $ showString "  push " . shows n . showChar '\n' . s
+    go (GAdd c) = do
+      s <- go c
+      pure $ showString "  add\n" . s
+    go (GLoad c) = do
+      s <- go c
+      pure $ showString "  load\n" . s
+    go (GStore c) = do
+      s <- go c
+      pure $ showString "  store\n" . s
+    go (GPop c) = do
+      s <- go c
+      pure $ showString "  pop\n" . s
+    go (GJpz lz lnz) =
+      pure $ showString "  jpz Lbl" . shows lz . showString " Lbl" . shows lnz . showChar '\n'
+    go (GJmp l) =
+      pure $ showString "  jmp Lbl" . shows l . showChar '\n'
     go (GLab f g) = do
       l <- get
       put (succ l)
-      (\s t -> s . showString "Lbl" . shows l . showString ":\n" . t) <$> go (f l) <*> go (g l)
+      s <- go (f l)
+      t <- go (g l)
+      pure $ s . showString "Lbl" . shows l . showString ":\n" . t
