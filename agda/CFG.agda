@@ -4,22 +4,33 @@
 
 module CFG where
 
-open import Cubical.Foundations.Everything
-open import Cubical.Data.Int using ( ℤ; pos; neg )
-open import Cubical.Data.Nat using ( ℕ )
+open import Cubical.Foundations.Everything hiding ( Partial )
+open import Cubical.Data.Bool using ( Dec→Bool; if_then_else_ )
+open import Cubical.Data.Int using ( ℤ; pos; neg; _+_; discreteℤ )
+open import Cubical.Data.List using ( List; []; _∷_ )
+open import Cubical.Data.Nat using ( ℕ; zero; suc )
 open import Cubical.Data.Vec using ( Vec; []; _∷_ )
 open import Cubical.Data.Sigma using ( _×_; _,_ )
+open import Cubical.Relation.Nullary using ( Dec; yes; no )
 
 open import LaterPrims
 
+private
+  variable
+    A B : Set
+
 --------------------------------------------------------------------------------
+-- Differences from the original Code/Codeᵍ:
+--   * terminator instructions are separated from other instructions
+--   * LABᵍ→ and LABᵍ← are merged into a single label constructor
+--   * some higher-inductive cases are added
+--   * guarded recursion instead of sized types
 
 infixr 5 _∷_
-infixl 4 label→-syntax
-infixl 3 label↔-syntax
+infixl 4 label-syntax
 
 data CFG (L : Set) (I : Set) (T : ℕ → Set) : Set where
-  _∷_ : (i : I) (c : CFG L I T) → CFG L I T
+  _∷_ : (x : I) (c : CFG L I T) → CFG L I T
   term : ∀ {n} (t : T n) (ls : Vec L n) → CFG L I T
   -- instructions before/after the label
   label : (c₁ c₂ : L → CFG L I T) → CFG L I T
@@ -29,10 +40,14 @@ data CFG (L : Set) (I : Set) (T : ℕ → Set) : Set where
   label-discard : (c₁ : CFG L I T) (c₂ : L → CFG L I T)
     → label (λ _ → c₁) c₂ ≡ c₁
 
+label-syntax : ∀ {L I T} (f g : L → CFG L I T) → CFG L I T
+label-syntax = label
+syntax label-syntax (λ l₁ → c₁) (λ l₂ → c₂) = c₁ label[ l₁ , l₂ ] c₂
+
 data Tree (I : Set) (T : ℕ → Set) : Set where
-  _∷_ : I → Tree I T → Tree I T
-  branch : ∀ {n} → T n → Vec (Tree I T) n → Tree I T
-  rec : ▹ Tree I T → Tree I T
+  _∷_ : (x : I) (t : Tree I T) → Tree I T
+  branch : ∀ {n} (t : T n) (ts : Vec (Tree I T) n) → Tree I T
+  rec : (t▹ : ▹ Tree I T) → Tree I T
 
 unlabel : ∀ {I T} → CFG (Tree I T) I T → Tree I T
 unlabel (x ∷ c) = x ∷ unlabel c
@@ -43,13 +58,18 @@ unlabel (label-discard c₁ c₂ i) = unlabel c₁
 
 --------------------------------------------------------------------------------
 
-label↔-syntax : ∀ {L I T} (f g : L → CFG L I T) → CFG L I T
-label↔-syntax = label
-syntax label↔-syntax (λ l₁ → c₁) (λ l₂ → c₂) = c₁ label[ l₁ , l₂ ] c₂
+infixl 5 _>>=_
 
-label→-syntax : ∀ {L I T} (c₁ : L → CFG L I T) (c₂ : CFG L I T) → CFG L I T
-label→-syntax c₁ c₂ = label c₁ (λ _ → c₂)
-syntax label→-syntax (λ l → c₁) c₂ = c₁ label[ l ] c₂
+data Partial (A : Set) : Set where
+  now : A → Partial A
+  later : ▹ Partial A → Partial A
+
+return : A → Partial A
+return = now
+
+_>>=_ : Partial A → (A → Partial B) → Partial B
+now x >>= f = f x
+later x >>= f = later λ α → x α >>= f
 
 --------------------------------------------------------------------------------
 
@@ -63,24 +83,108 @@ data Term : ℕ → Set where
   jpz : Term 2
   jmp : Term 1
 
-pattern gret = term ret []
-pattern gjpz l1 l2 = term jpz (l1 ∷ l2 ∷ [])
-pattern gjmp l = term jmp (l ∷ [])
-pattern tret = branch ret []
-pattern tjpz t1 t2 = branch jpz (t1 ∷ t2 ∷ [])
-pattern tjmp t = branch jmp (t ∷ [])
+pattern retᵍ = term ret []
+pattern jpzᵍ l1 l2 = term jpz (l1 ∷ l2 ∷ [])
+pattern jmpᵍ l = term jmp (l ∷ [])
+pattern retᵗ = branch ret []
+pattern jpzᵗ t1 t2 = branch jpz (t1 ∷ t2 ∷ [])
+pattern jmpᵗ t = branch jmp (t ∷ [])
+
+--------------------------------------------------------------------------------
+
+infixl 5 _`+_
+
+data Expr : Set where
+  val : ℤ → Expr
+  _`+_ : Expr → Expr → Expr
+  put : Expr → Expr → Expr
+  get : Expr
+  while : Expr → Expr → Expr
+
+eval : Expr → ℤ → Partial (ℤ × ℤ)
+eval (val n) s = return (n , s)
+eval (x `+ y) s = do
+  m , s₁ ← eval x s
+  n , s₂ ← eval y s₁
+  return (m + n , s₂)
+eval (put x y) s = do
+  n , _ ← eval x s
+  eval y n
+eval get s = return (s , s)
+eval (while x y) = fix λ f▹ s → do
+  n , s₁ ← eval x s
+  if Dec→Bool (discreteℤ n (pos 0))
+    then return (pos 0 , s₁)
+    else do
+      _ , s₂ ← eval y s₁
+      later λ α → f▹ α s₂
+
+--------------------------------------------------------------------------------
+
+execᵗ : Tree Instr Term → (List ℤ × ℤ) → Partial (List ℤ × ℤ)
+execᵗ (push n ∷ t) (ss , s) = execᵗ t (n ∷ ss , s)
+execᵗ (add ∷ t) (m ∷ n ∷ ss , s) = execᵗ t ((n + m) ∷ ss , s)
+execᵗ (store ∷ t) (n ∷ ss , _) = execᵗ t (ss , n)
+execᵗ (load ∷ t) (ss , s) = execᵗ t (s ∷ ss , s)
+execᵗ (pop ∷ t) (_ ∷ ss , s) = execᵗ t (ss , s)
+execᵗ retᵗ conf = return conf
+execᵗ (jpzᵗ t₁ t₂) (n ∷ ss , s) =
+  if Dec→Bool (discreteℤ n (pos 0))
+    then execᵗ t₁ (pos 0 ∷ ss , s)
+    else execᵗ t₂ (ss , s)
+execᵗ (jmpᵗ t) conf = execᵗ t conf
+execᵗ (rec t▹) conf = later λ α → execᵗ (t▹ α) conf
+execᵗ _ _ = return ([] , pos 0)
+
+compᵗ : Expr → Tree Instr Term → Tree Instr Term
+compᵗ (val n) t = push n ∷ t
+compᵗ (x `+ y) t = compᵗ x $ compᵗ y $ add ∷ t
+compᵗ (put x y) t = compᵗ x $ store ∷ compᵗ y t
+compᵗ get t = load ∷ t
+compᵗ (while x y) t = fix λ t▹ →
+  compᵗ x $ jpzᵗ t $ compᵗ y $ pop ∷ rec t▹
+
+compileᵗ : Expr → Tree Instr Term
+compileᵗ e = compᵗ e retᵗ
+
+expr : Expr
+expr = put (val (pos 10)) (while get (put (get `+ val (neg 1)) get))
+
+--------------------------------------------------------------------------------
+
+compᵍ : ∀ {L} → Expr → CFG L Instr Term → CFG L Instr Term
+compᵍ (val n) c = push n ∷ c
+compᵍ (x `+ y) c = compᵍ x $ compᵍ y (add ∷ c)
+compᵍ (put x y) c = compᵍ x $ store ∷ compᵍ y c
+compᵍ get c = load ∷ c
+compᵍ (while x y) c =
+    jmpᵍ l₁
+  label[ l₁ , l₁ ]
+    (compᵍ x (jpzᵍ l₃ l₂)
+  label[ l₂ , _ ]
+    compᵍ y (pop ∷ jmpᵍ l₁)
+  label[ l₃ , _ ]
+    c)
+
+compileᵍ : ∀ {L} → Expr → CFG L Instr Term
+compileᵍ e = compᵍ e retᵍ
+
+execᵍ : (∀ {L} → CFG L Instr Term) → (List ℤ × ℤ) → Partial (List ℤ × ℤ)
+execᵍ c conf = execᵗ (unlabel c) conf
+
+--------------------------------------------------------------------------------
 
 {-
         |                   +----------<-----------+
         v        +---->---+ |      +--->----+      |
-    .---------.  |  . l1 -+-+---.  |  . l2 -+---.  |
+    .---------.  |  . l₁ -+-+---.  |  . l₂ -+---.  |
     | push 10 |  |  | load      |  |  | load    |  |
-    | store   |  ^  | jpz l3 l2 |  ^  | push -1 |  |
-    | jmp l1  |  |  '-----+--+--'  |  | add     |  |
+    | store   |  ^  | jpz l₃ l₂ |  ^  | push -1 |  |
+    | jmp l₁  |  |  '-----+--+--'  |  | add     |  |
     '----+----'  |        v  +-->--+  | store   |  ^
-         +--->---+  . l3 -+-----.     | load    |  |
+         +--->---+  . l₂ -+-----.     | load    |  |
                     | tret      |     | pop     |  |
-                    '-----------'     | jmp l1  |  |
+                    '-----------'     | jmp l₁  |  |
                                       '----+----'  |
                                            +--->---+
 -}
@@ -89,35 +193,35 @@ cfg : ∀ {L} → CFG L Instr Term
 cfg =
     push (pos 10) ∷
     store ∷
-    gjmp l1
-  label[ l1 , l1' ]
-    load ∷
-    gjpz l3 l2
-  label[ l2 ]
+    jmpᵍ l₁
+  label[ l₁ , l₁ ]
+    (load ∷
+    jpzᵍ l₃ l₂
+  label[ l₂ , _ ]
     load ∷
     push (neg 1) ∷
     add ∷
     store ∷
     load ∷
     pop ∷
-    gjmp l1'
-  label[ l3 ]
-    gret
+    jmpᵍ l₁
+  label[ l₃ , _ ]
+    retᵍ)
 
 tree : Tree Instr Term
 tree =
   push (pos 10) ∷
   store ∷
-  tjmp (fix λ c▹ →
+  jmpᵗ (fix λ c▹ →
     load ∷
-    tjpz tret (
+    jpzᵗ retᵗ (
       load ∷
       push (neg 1) ∷
       add ∷
       store ∷
       load ∷
       pop ∷
-      tjmp (rec c▹)))
+      jmpᵗ (rec c▹)))
 
 _ : unlabel cfg ≡ tree
 _ = refl
