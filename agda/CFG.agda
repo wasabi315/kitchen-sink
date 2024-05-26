@@ -15,28 +15,41 @@ open import LaterPrims
 --------------------------------------------------------------------------------
 
 infixr 5 _∷_
-infix 6 _label_
+infixl 4 label→-syntax
+infixl 3 label↔-syntax
 
 data CFG (L : Set) (I : Set) (T : ℕ → Set) : Set where
-  _∷_ : I → CFG L I T → CFG L I T
-  term : ∀ {n} → T n → Vec L n → CFG L I T
-  _label_ :
-      (L → CFG L I T) → -- instructions before the label
-      (L → CFG L I T) → -- instructions after the label
-      CFG L I T
-  ∷-label-comm : (x : I) (f g : L → CFG L I T)
-    → x ∷ f label g ≡ (λ l → x ∷ f l) label g
+  _∷_ : (i : I) (c : CFG L I T) → CFG L I T
+  term : ∀ {n} (t : T n) (ls : Vec L n) → CFG L I T
+  -- instructions before/after the label
+  label : (c₁ c₂ : L → CFG L I T) → CFG L I T
+
+  ∷-label-comm : (x : I) (c₁ c₂ : L → CFG L I T)
+    → x ∷ label c₁ c₂ ≡ label (λ l → x ∷ c₁ l) c₂
+  label-discard : (c₁ : CFG L I T) (c₂ : L → CFG L I T)
+    → label (λ _ → c₁) c₂ ≡ c₁
 
 data Tree (I : Set) (T : ℕ → Set) : Set where
   _∷_ : I → Tree I T → Tree I T
   branch : ∀ {n} → T n → Vec (Tree I T) n → Tree I T
   rec : ▹ Tree I T → Tree I T
 
-unlabel : {I : Set} {T : ℕ → Set} → CFG (Tree I T) I T → Tree I T
+unlabel : ∀ {I T} → CFG (Tree I T) I T → Tree I T
 unlabel (x ∷ c) = x ∷ unlabel c
 unlabel (term t ls) = branch t ls
-unlabel (f label g) = unlabel $ f $ fix λ c▹ → unlabel $ g $ rec c▹
-unlabel (∷-label-comm x f g i) = x ∷ unlabel (f (fix λ c▹ → unlabel (g (rec c▹))))
+unlabel (label c₁ c₂) = unlabel $ c₁ $ fix λ c▹ → unlabel $ c₂ $ rec c▹
+unlabel (∷-label-comm x c₁ c₂ i) = x ∷ (unlabel $ c₁ $ fix λ c▹ → unlabel $ c₂ $ rec c▹)
+unlabel (label-discard c₁ c₂ i) = unlabel c₁
+
+--------------------------------------------------------------------------------
+
+label↔-syntax : ∀ {L I T} (f g : L → CFG L I T) → CFG L I T
+label↔-syntax = label
+syntax label↔-syntax (λ l₁ → c₁) (λ l₂ → c₂) = c₁ label[ l₁ , l₂ ] c₂
+
+label→-syntax : ∀ {L I T} (c₁ : L → CFG L I T) (c₂ : CFG L I T) → CFG L I T
+label→-syntax c₁ c₂ = label c₁ (λ _ → c₂)
+syntax label→-syntax (λ l → c₁) c₂ = c₁ label[ l ] c₂
 
 --------------------------------------------------------------------------------
 
@@ -58,8 +71,8 @@ pattern tjpz t1 t2 = branch jpz (t1 ∷ t2 ∷ [])
 pattern tjmp t = branch jmp (t ∷ [])
 
 {-
-                            +----------<-----------+
-                 +---->---+ |      +--->----+      |
+        |                   +----------<-----------+
+        v        +---->---+ |      +--->----+      |
     .---------.  |  . l1 -+-+---.  |  . l2 -+---.  |
     | push 10 |  |  | load      |  |  | load    |  |
     | store   |  ^  | jpz l3 l2 |  ^  | push -1 |  |
@@ -76,20 +89,19 @@ cfg : ∀ {L} → CFG L Instr Term
 cfg =
     push (pos 10) ∷
     store ∷
-    gjmp
-  label λ l1 →
-  (λ l3 →
+    gjmp l1
+  label[ l1 , l1' ]
     load ∷
-    (gjpz l3)
-  label λ l2 →
+    gjpz l3 l2
+  label[ l2 ]
     load ∷
     push (neg 1) ∷
     add ∷
     store ∷
     load ∷
     pop ∷
-    gjmp l1)
-  label λ l3 →
+    gjmp l1'
+  label[ l3 ]
     gret
 
 tree : Tree Instr Term
