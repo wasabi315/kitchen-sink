@@ -93,6 +93,9 @@ hprintf = khprintf id
 fprintf :: Handle -> forall s -> (Kprintf s (IO ()) f) => f
 fprintf h = khprintf ($ h)
 
+kfprintf :: (Handle -> IO ()) -> Handle -> forall s -> (Kprintf s (IO ()) f) => f
+kfprintf k h = khprintf \f -> f h *> k h
+
 printf :: forall s -> (Kprintf s (IO ()) f) => f
 printf = fprintf stdout
 
