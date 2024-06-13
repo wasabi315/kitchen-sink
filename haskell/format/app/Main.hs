@@ -9,6 +9,7 @@
 
 import Data.Kind
 import Data.Proxy
+import GHC.TypeError
 import GHC.TypeLits
 import System.IO
 
@@ -20,8 +21,11 @@ type family Snoc xs x where
   Snoc '[] x = '[x]
   Snoc (x ': xs) y = x ': Snoc xs y
 
+type CharToSymbol :: Char -> Symbol
+type CharToSymbol c = ConsSymbol c ""
+
 type SnocSymbol :: Symbol -> Char -> Symbol
-type SnocSymbol s c = AppendSymbol s (ConsSymbol c "")
+type SnocSymbol s c = AppendSymbol s (CharToSymbol c)
 
 type Split :: Char -> Symbol -> (Symbol, Symbol)
 type Split c s = SplitAux c "" (UnconsSymbol s)
@@ -42,6 +46,7 @@ type family ParseAux1 acc s where
 type ParseAux2 :: [Either Symbol Char] -> Maybe (Char, Symbol) -> [Either Symbol Char]
 type family ParseAux2 acc s where
   ParseAux2 acc 'Nothing = acc
+  ParseAux2 acc ('Just '( '%', s)) = ParseAux1 (Snoc acc (Left (CharToSymbol '%'))) (Split '%' s)
   ParseAux2 acc ('Just '(c, s)) = ParseAux1 (Snoc acc (Right c)) (Split '%' s)
 
 --------------------------------------------------------------------------------
@@ -56,45 +61,70 @@ instance (Integral a) => FormatArg 'd' a where
 instance (a ~ String) => FormatArg 's' a where
   formatArg = showString
 
---------------------------------------------------------------------------------
+instance {-# OVERLAPPABLE #-} (Unsatisfiable ('Text "Unsupported format specifier: \"" :<>: 'ShowType c :<>: 'Text "\"")) => FormatArg c a where
+  formatArg = unsatisfiable
+
+class Output a where
+  output :: String -> a
 
 type FormatFun :: [Either Symbol Char] -> Type -> Type -> Constraint
-class FormatFun fmt k f where
-  formatFun :: ShowS -> k -> f
+class FormatFun fmt a f where
+  formatFun :: (Output r) => ShowS -> (r -> a) -> f
 
-instance (a ~ b) => FormatFun '[] (String -> a) b where
-  formatFun acc k = k (acc "")
+instance (a ~ b) => FormatFun '[] a b where
+  formatFun acc k = k (output (acc ""))
 
-instance (a ~ (), b ~ c) => FormatFun '[] (IO a -> b) c where
-  formatFun acc k = k $ putStr (acc "")
-
-instance (a ~ (), b ~ c) => FormatFun '[] ((Handle -> IO a) -> b) c where
-  formatFun acc k = k \h -> hPutStr h (acc "")
-
-instance (KnownSymbol s, FormatFun fmt k f) => FormatFun (Left s ': fmt) k f where
+instance (KnownSymbol s, FormatFun fmt a f) => FormatFun (Left s ': fmt) a f where
   formatFun acc = formatFun @fmt (acc . showString (symbolVal @s Proxy))
 
-instance (g ~ (a -> f), FormatArg c a, FormatFun fmt k f) => FormatFun (Right c ': fmt) k g where
+instance (g ~ (b -> f), FormatArg c b, FormatFun fmt a f) => FormatFun (Right c ': fmt) a g where
   formatFun acc k arg = formatFun @fmt (acc . formatArg @c arg) k
+
+type KPrintf :: Symbol -> Type -> Type -> Constraint
+type KPrintf s = FormatFun (Parse s)
+
+kprintf :: (Output r) => (r -> a) -> forall s -> (KPrintf s a f) => f
+kprintf k s = formatFun @(Parse s) id k
 
 --------------------------------------------------------------------------------
 
-type KPrintf :: Symbol -> Type -> Type -> Constraint
-class KPrintf s k f where
-  kprintf :: k -> forall s' -> (s ~ s') => f
+instance Output String where
+  output = id
 
-instance (Parse s ~ fmt, FormatFun fmt k f) => KPrintf s k f where
-  kprintf k _ = formatFun @fmt id k
+ksprintf :: (String -> a) -> forall s -> (KPrintf s a f) => f
+ksprintf = kprintf
+
+sprintf :: forall s -> (KPrintf s String f) => f
+sprintf = ksprintf id
+
+--------------------------------------------------------------------------------
+
+instance Output (Handle -> IO ()) where
+  output s h = hPutStr h s
+
+khprintf :: ((Handle -> IO ()) -> a) -> forall s -> (KPrintf s a f) => f
+khprintf = kprintf
+
+hprintf :: forall s -> (KPrintf s (Handle -> IO ()) f) => f
+hprintf = khprintf id
+
+fprintf :: Handle -> forall s -> (KPrintf s (IO ()) f) => f
+fprintf h = khprintf \f -> f h
+
+printf :: forall s -> (KPrintf s (IO ()) f) => f
+printf = fprintf stdout
 
 --------------------------------------------------------------------------------
 
 main :: IO ()
 main = do
-  kprintf (\f -> f stdout *> f stderr :: IO ())
+  khprintf
+    (\f -> f stdout *> f stderr)
     "%d + %d\n"
     (1 :: Int)
     (2 :: Int)
-  kprintf (\f h -> f (h :: Handle) :: IO ())
+  khprintf
+    (\f h -> f h)
     "Hello, %s!\n"
-    "wasabi"
+    "world"
     stdout
