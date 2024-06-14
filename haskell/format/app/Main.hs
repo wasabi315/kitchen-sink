@@ -53,15 +53,17 @@ instance (Integral a) => FormatArg 'd' a where
 instance (a ~ String) => FormatArg 's' a where
   formatArg = showString
 
-instance {-# OVERLAPPABLE #-} (Unsatisfiable ('Text "Unsupported format specifier: \"" :<>: 'ShowType c :<>: 'Text "\"")) => FormatArg c a where
+type UnsupportedFormatSpecifierMsg c = 'Text "Unsupported format specifier: " :<>: 'ShowType c
+
+instance {-# OVERLAPPABLE #-} (Unsatisfiable (UnsupportedFormatSpecifierMsg c)) => FormatArg c a where
   formatArg = unsatisfiable
 
 type FormatFun :: [Either Symbol Char] -> Type -> Type -> Constraint
 class FormatFun fmt a f where
-  formatFun :: ShowS -> (ShowS -> a) -> f
+  formatFun :: ShowS -> (String -> a) -> f
 
 instance (a ~ b) => FormatFun '[] a b where
-  formatFun acc k = k acc
+  formatFun acc k = k (acc "")
 
 instance (KnownSymbol s, FormatFun fmt a f) => FormatFun (Left s ': fmt) a f where
   formatFun acc = formatFun @fmt (acc . showString (symbolVal @s Proxy))
@@ -69,34 +71,29 @@ instance (KnownSymbol s, FormatFun fmt a f) => FormatFun (Left s ': fmt) a f whe
 instance (g ~ (x -> f), FormatArg c x, FormatFun fmt a f) => FormatFun (Right c ': fmt) a g where
   formatFun acc k arg = formatFun @fmt (acc . formatArg @c arg) k
 
-type Kprintf s = FormatFun (Parse s)
-
-kprintf :: (ShowS -> a) -> forall s -> (Kprintf s a f) => f
-kprintf k s = formatFun @(Parse s) id k
-
 --------------------------------------------------------------------------------
 
-ksprintf :: (String -> a) -> forall s -> (Kprintf s a f) => f
-ksprintf k = kprintf \s -> k (s "")
+type Ksprintf s = FormatFun (Parse s)
 
-sprintf :: forall s -> (Kprintf s String f) => f
+ksprintf :: (String -> a) -> forall s -> (Ksprintf s a f) => f
+ksprintf k s = formatFun @(Parse s) id k
+
+sprintf :: forall s -> (Ksprintf s String f) => f
 sprintf = ksprintf id
 
---------------------------------------------------------------------------------
+khprintf :: ((Handle -> IO ()) -> a) -> forall s -> (Ksprintf s a f) => f
+khprintf k = ksprintf \s -> k \h -> hPutStr h s
 
-khprintf :: ((Handle -> IO ()) -> a) -> forall s -> (Kprintf s a f) => f
-khprintf k = kprintf \s -> k \h -> hPutStr h (s "")
-
-hprintf :: forall s -> (Kprintf s (Handle -> IO ()) f) => f
+hprintf :: forall s -> (Ksprintf s (Handle -> IO ()) f) => f
 hprintf = khprintf id
 
-fprintf :: Handle -> forall s -> (Kprintf s (IO ()) f) => f
-fprintf h = khprintf ($ h)
-
-kfprintf :: (Handle -> IO ()) -> Handle -> forall s -> (Kprintf s (IO ()) f) => f
+kfprintf :: (Handle -> IO ()) -> Handle -> forall s -> (Ksprintf s (IO ()) f) => f
 kfprintf k h = khprintf \f -> f h *> k h
 
-printf :: forall s -> (Kprintf s (IO ()) f) => f
+fprintf :: Handle -> forall s -> (Ksprintf s (IO ()) f) => f
+fprintf = kfprintf \_ -> pure ()
+
+printf :: forall s -> (Ksprintf s (IO ()) f) => f
 printf = fprintf stdout
 
 --------------------------------------------------------------------------------
@@ -108,8 +105,7 @@ main = do
     "%d + %d\n"
     (1 :: Int)
     (2 :: Int)
-  khprintf
-    (\f h -> f h)
+  hprintf
     "Hello, %s!\n"
     "world"
     stdout
