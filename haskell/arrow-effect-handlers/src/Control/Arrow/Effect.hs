@@ -1,11 +1,7 @@
 {-# LANGUAGE BlockArguments #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE QuantifiedConstraints #-}
-{-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE RecordWildCards #-}
-{-# LANGUAGE ScopedTypeVariables #-}
-{-# LANGUAGE StandaloneDeriving #-}
-{-# LANGUAGE TupleSections #-}
 
 module Control.Arrow.Effect
   ( Eff (..),
@@ -49,8 +45,7 @@ deriving instance (forall i o. Show (op i o)) => Show (Eff op b c)
 
 instance Category (Eff op) where
   id = Arr id
-  Comp f g . h = f . (g . h) -- for associativity
-  f . g = Comp f g
+  (.) = Comp
 
 instance Arrow (Eff op) where
   arr = Arr

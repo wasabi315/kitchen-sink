@@ -1,7 +1,5 @@
 {-# LANGUAGE BlockArguments #-}
-{-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE RecordWildCards #-}
-{-# LANGUAGE TupleSections #-}
 
 module Control.Arrow.Effect.Final
   ( Eff (..),

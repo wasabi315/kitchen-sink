@@ -1,8 +1,6 @@
 {-# LANGUAGE BlockArguments #-}
 {-# LANGUAGE GADTs #-}
-{-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE RecordWildCards #-}
-{-# LANGUAGE ScopedTypeVariables #-}
 
 module Control.Arrow.Effect.MoreInputs (Eff (..), Handler (..), handleWith) where
 

@@ -2,12 +2,9 @@
 {-# LANGUAGE BlockArguments #-}
 {-# LANGUAGE DisambiguateRecordFields #-}
 {-# LANGUAGE GADTs #-}
-{-# LANGUAGE ImportQualifiedPost #-}
 {-# LANGUAGE LambdaCase #-}
-{-# LANGUAGE RankNTypes #-}
-{-# LANGUAGE ScopedTypeVariables #-}
 
-module Main (module Main) where
+module Main where
 
 import Control.Arrow
 import Control.Arrow.Effect
@@ -15,6 +12,8 @@ import Control.Arrow.Effect.ArrowApply qualified as ArrowApply
 import Control.Arrow.Effect.Final qualified as Final
 import Control.Arrow.Effect.MoreInputs qualified as MoreInputs
 import Prelude hiding (id, (.))
+
+--------------------------------------------------------------------------------
 
 data SuccRes i o where
   SuccRes :: SuccRes x x
@@ -61,6 +60,22 @@ testSuccResAA = runSuccResAA proc n -> do
   o <- Op SuccRes -< m
   returnA -< m + o
 
+--------------------------------------------------------------------------------
+
+data Amb i o where
+  Flip :: Amb () Bool
+
+runAmb :: (ArrowPlus a) => Eff Amb b c -> a b c
+runAmb = interpret \Flip -> arr (const True) <+> arr (const False)
+
+testAmb :: Int -> [Int]
+testAmb = runKleisli $ runAmb proc n -> do
+  b1 <- Op Flip -< ()
+  b2 <- Op Flip -< ()
+  returnA -< if b1 || b2 then n else -n
+
+--------------------------------------------------------------------------------
+
 data State s i o where
   Get :: State s () s
   Set :: State s s ()
@@ -83,9 +98,12 @@ testState = runState proc n -> do
   Op Set -< n + s
   returnA -< s
 
+--------------------------------------------------------------------------------
+
 main :: IO ()
 main = do
   print $ testSuccRes 10
   print $ testSuccResF 10
   print $ testSuccResAA 10
+  print $ testAmb 10
   print $ testState (2, 40)

@@ -9,7 +9,7 @@ maintainer:         wasabi.nvim.st@gmail.com
 -- copyright:
 
 common defaults
-    default-language: Haskell2010
+    default-language: GHC2021
     ghc-options:
         -Wall
         -Wcompat
@@ -27,8 +27,7 @@ library
         Control.Arrow.Effect.Final
         Control.Arrow.Effect.MoreInputs
     build-depends:
-        base >=4.16,
-        constraints
+        base >=4.16
 
 executable arrow-effect-handlers-exe
     import: defaults
