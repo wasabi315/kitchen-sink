@@ -160,11 +160,14 @@ let rec infer_ env level : renamed -> typed_ = function
     let ty = instantiate level (List.nth_exn env i) in
     EVar (x, i), (loc, ty)
   | EApp ((), t, u), loc ->
-    let ((_, (_, funty)) as t) = infer_ env level t in
-    let paramty, retty = match_fun_ty funty in
-    let ((_, (_, argty)) as u) = infer_ env level u in
-    unify paramty argty;
-    EApp ((), t, u), (loc, retty)
+    Reporter.merge_loc (Some loc) (fun () ->
+      let ((_, (tloc, funty)) as t) = infer_ env level t in
+      let paramty, retty =
+        Reporter.merge_loc (Some tloc) (fun () -> match_fun_ty funty)
+      in
+      let ((_, (uloc, argty)) as u) = infer_ env level u in
+      Reporter.merge_loc (Some uloc) (fun () -> unify paramty argty);
+      EApp ((), t, u), (loc, retty))
   | ELam (x, (), t), loc ->
     let argty = new_var level in
     let ((_, (_, retty)) as t) = infer_ (argty :: env) level t in
@@ -172,7 +175,7 @@ let rec infer_ env level : renamed -> typed_ = function
     ELam ((x, argty), (), t), (loc, ty)
   | ELet (x, (), t, u), loc ->
     let ((_, (_, varty)) as t) =
-      Reporter.tracef ~loc "When typechecking %s" x @@ fun () -> infer_ env (level + 1) t
+      Reporter.tracef "When typechecking %s" x (fun () -> infer_ env (level + 1) t)
     in
     let ((_, varty) as scheme) = generalise level varty in
     let ((_, (_, bodyty)) as u) = infer_ (varty :: env) level u in
