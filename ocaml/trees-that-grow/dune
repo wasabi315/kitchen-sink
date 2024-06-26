@@ -1,9 +1,14 @@
 (env
- (dev
-  (flags
-   (:standard -warn-error -A))))
+  (dev
+    (flags (:standard -warn-error -A))))
+
+(menhir
+ (flags (--explain))
+ (modules parser))
+
+(ocamllex
+ (modules lexer))
 
 (executable
  (name main)
- (libraries core)
- (preprocess (pps ppx_jane)))
+ (libraries asai core))

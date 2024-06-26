@@ -1,0 +1,4 @@
+let two = \s. \z. s (s z) in
+let add = \a. \b. \s. \z. a s (b s z) in
+let four = add two two in
+add four four
