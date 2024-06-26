@@ -6,6 +6,9 @@ type 'x term = 'x term' * 'xmeta
     'x =
     < xname : 'xname
     ; xbind : 'xbind
+    ; xnat : 'xnat
+    ; xsuc : 'xsuc
+    ; xnatrec : 'xnatrec
     ; xvar : 'xvar
     ; xapp : 'xapp
     ; xlam : 'xlam
@@ -14,6 +17,9 @@ type 'x term = 'x term' * 'xmeta
     ; .. >
 
 and 'x term' =
+  | ENat of 'xnat * int
+  | ESuc of 'xsuc
+  | ENatrec of 'xnatrec
   | EVar of 'xvar * 'xname
   | EApp of 'xapp * 'x term * 'x term
   | ELam of 'xlam * 'xbind * 'x term
@@ -22,6 +28,9 @@ and 'x term' =
     'x =
     < xname : 'xname
     ; xbind : 'xbind
+    ; xnat : 'xnat
+    ; xsuc : 'xsuc
+    ; xnatrec : 'xnatrec
     ; xvar : 'xvar
     ; xapp : 'xapp
     ; xlam : 'xlam
@@ -32,6 +41,9 @@ and 'x term' =
 type x_parsed =
   < xname : string
   ; xbind : string
+  ; xnat : unit
+  ; xsuc : unit
+  ; xnatrec : unit
   ; xvar : unit
   ; xapp : unit
   ; xlam : unit
@@ -48,6 +60,9 @@ let pp_paren b p ppf =
 
 let pp_parsed =
   let rec pp prec : parsed -> formatter -> unit = function
+    | ENat (_, n), _ -> dprintf "%d" n
+    | ESuc _, _ -> dprintf "suc"
+    | ENatrec _, _ -> dprintf "natrec"
     | EVar (_, v), _ -> dprintf "%s" v
     | EApp (_, t, u), _ -> pp_paren (prec > 10) (dprintf "%t %t" (pp 10 t) (pp 11 u))
     | ELam (_, x, t), _ -> pp_paren (prec > 0) (dprintf "λ%s. %t" x (pp 0 t))

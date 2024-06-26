@@ -5,6 +5,9 @@ open Format
 type x_renamed =
   < xname : int
   ; xbind : unit
+  ; xnat : unit
+  ; xsuc : unit
+  ; xnatrec : unit
   ; xvar : string
   ; xapp : unit
   ; xlam : string
@@ -15,7 +18,10 @@ type renamed = x_renamed term
 
 let pp_renamed =
   let rec pp prec : renamed -> formatter -> unit = function
-    | EVar (_, v), _ -> dprintf "%d" v
+    | ENat (_, n), _ -> dprintf "%d" n
+    | ESuc _, _ -> dprintf "suc"
+    | ENatrec _, _ -> dprintf "natrec"
+    | EVar (_, v), _ -> dprintf "#%d" v
     | EApp (_, t, u), _ -> pp_paren (prec > 10) (dprintf "%t %t" (pp 10 t) (pp 11 u))
     | ELam (_, _, t), _ -> pp_paren (prec > 0) (dprintf "λ %t" (pp 0 t))
     | ELet (_, _, t, u), _ ->
@@ -26,6 +32,7 @@ let pp_renamed =
 
 let rename =
   let rec rn env : parsed -> renamed = function
+    | ((ENat _ | ESuc _ | ENatrec _), _) as e -> e
     | EVar ((), x), loc ->
       let i = List.findi env ~f:(fun _ y -> String.(x = y)) in
       (match i with

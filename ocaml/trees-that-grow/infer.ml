@@ -6,6 +6,7 @@ module Id = Int
 module Level = Int
 
 type ty_ =
+  | TNat'
   | TVar' of tvar ref
   | TArr' of ty_ * ty_
 
@@ -27,6 +28,9 @@ let gen_id =
 type x_typed_ =
   < xname : int
   ; xbind : unit
+  ; xnat : unit
+  ; xsuc : unit
+  ; xnatrec : unit
   ; xvar : string
   ; xapp : unit
   ; xlam : string * ty_ (* type of the argument *)
@@ -37,6 +41,7 @@ type typed_ = x_typed_ term
 
 let pp_ty_ =
   let rec pp prec = function
+    | TNat' -> dprintf "Nat"
     | TVar' { contents = Unbound (id, _) } -> dprintf "_%d" id
     | TVar' { contents = Link ty } -> pp prec ty
     | TVar' { contents = Generic id } -> dprintf "'%d" id
@@ -58,7 +63,10 @@ let pp_scheme_ ppf (ids, ty) =
 
 let pp_typed_ =
   let rec pp : typed_ -> formatter -> unit = function
-    | EVar (_, i), (_, ty) -> dprintf "(%d : %a)" i pp_ty_ ty
+    | ENat (_, n), _ -> dprintf "%d" n
+    | ESuc _, _ -> dprintf "suc"
+    | ENatrec _, _ -> dprintf "natrec"
+    | EVar (_, i), (_, ty) -> dprintf "(#%d : %a)" i pp_ty_ ty
     | EApp (_, t, u), (_, ty) -> dprintf "(%t %t : %a)" (pp t) (pp u) pp_ty_ ty
     | ELam ((_, argty), (), t), (_, ty) ->
       dprintf "((λ _: %a. %t) : %a)" pp_ty_ argty (pp t) pp_ty_ ty
@@ -71,6 +79,7 @@ let pp_typed_ =
 let new_var level = TVar' (ref (Unbound (gen_id (), level)))
 
 let rec occurs id = function
+  | TNat' -> false
   | TVar' { contents = Unbound (id', _) } -> id = id'
   | TVar' { contents = Link ty } -> occurs id ty
   | TVar' { contents = Generic _ } -> false
@@ -78,6 +87,7 @@ let rec occurs id = function
 ;;
 
 let rec adjust_level level = function
+  | TNat' -> ()
   | TVar' ({ contents = Unbound (id, level') } as tv) ->
     if level' > level then tv := Unbound (id, level)
   | TVar' { contents = Link ty } -> adjust_level level ty
@@ -100,7 +110,7 @@ let rec unify ty1 ty2 =
     if occurs id ty then Reporter.fatalf Type_err "Recursive type detected";
     adjust_level level ty;
     tv := Link ty
-  | _ -> Reporter.fatalf Type_err "Failed to unify %a and %a" pp_ty_ ty1 pp_ty_ ty2
+  | _ -> Reporter.fatalf Type_err "Could not match %a and %a" pp_ty_ ty1 pp_ty_ ty2
 ;;
 
 let rec generalise level = function
@@ -118,6 +128,7 @@ let rec generalise level = function
 let instantiate level ty =
   let id_var_map = Hashtbl.create (module Id) in
   let rec f = function
+    | TNat' -> TNat'
     | TVar' { contents = Link ty } -> f ty
     | TVar' { contents = Generic id } ->
       Hashtbl.find_or_add id_var_map id ~default:(fun () -> new_var level)
@@ -139,6 +150,12 @@ let rec match_fun_ty = function
 ;;
 
 let rec infer_ env level : renamed -> typed_ = function
+  | (ENat _ as e), loc -> e, (loc, TNat')
+  | (ESuc _ as e), loc -> e, (loc, TArr' (TNat', TNat'))
+  | (ENatrec _ as e), loc ->
+    let tv = new_var level in
+    let ty = TArr' (tv, TArr' (TArr' (TNat', TArr' (tv, tv)), TArr' (TNat', tv))) in
+    e, (loc, ty)
   | EVar (x, i), loc ->
     let ty = instantiate level (List.nth_exn env i) in
     EVar (x, i), (loc, ty)
@@ -154,15 +171,16 @@ let rec infer_ env level : renamed -> typed_ = function
     let ty = TArr' (argty, retty) in
     ELam ((x, argty), (), t), (loc, ty)
   | ELet (x, (), t, u), loc ->
-    Reporter.tracef ~loc "When typechecking %s" x
-    @@ fun () ->
-    let ((_, (_, varty)) as t) = infer_ env (level + 1) t in
+    let ((_, (_, varty)) as t) =
+      Reporter.tracef ~loc "When typechecking %s" x @@ fun () -> infer_ env (level + 1) t
+    in
     let ((_, varty) as scheme) = generalise level varty in
     let ((_, (_, bodyty)) as u) = infer_ (varty :: env) level u in
     ELet ((x, scheme), (), t, u), (loc, bodyty)
 ;;
 
 type ty =
+  | TNat
   | TVar of char
   | TArr of ty * ty
 
@@ -171,6 +189,9 @@ type scheme = Char.Set.t * ty
 type x_typed =
   < xname : int
   ; xbind : unit
+  ; xnat : unit
+  ; xsuc : unit
+  ; xnatrec : unit
   ; xvar : string
   ; xapp : unit
   ; xlam : string * ty (* type of the argument *)
@@ -181,6 +202,7 @@ type typed = x_typed term
 
 let pp_ty =
   let rec pp prec = function
+    | TNat -> dprintf "Nat"
     | TVar id -> dprintf "%c" id
     | TArr (ty1, ty2) -> pp_paren (prec > 10) (dprintf "%t -> %t" (pp 11 ty1) (pp 10 ty2))
   in
@@ -199,7 +221,10 @@ let pp_scheme ppf (ids, ty) =
 
 let pp_typed ppf t =
   let rec pp prec = function
-    | EVar (_, i), _ -> dprintf "%d" i
+    | ENat (_, n), _ -> dprintf "%d" n
+    | ESuc _, _ -> dprintf "suc"
+    | ENatrec _, _ -> dprintf "natrec"
+    | EVar (_, i), _ -> dprintf "#%d" i
     | EApp (_, t, u), _ -> pp_paren (prec > 10) (dprintf "%t %t" (pp 10 t) (pp 11 u))
     | ELam ((_, argty), (), t), _ ->
       pp_paren (prec > 0) (dprintf "λ _: %a. %t" pp_ty argty (pp 0 t))
@@ -222,6 +247,7 @@ let fresh_qvar =
 let typed_of_typed_ =
   let tbl = Hashtbl.create (module Id) in
   let rec ty_of_ty_ : ty_ -> ty = function
+    | TNat' -> TNat
     | TVar' { contents = Unbound (_, _) } ->
       Reporter.fatalf Impossible "Unbound type variable"
     | TVar' { contents = Link ty } -> ty_of_ty_ ty
@@ -234,6 +260,9 @@ let typed_of_typed_ =
     , ty_of_ty_ ty )
   in
   let rec f : typed_ -> typed = function
+    | (ENat _ as e), (loc, ty) -> e, (loc, ty_of_ty_ ty)
+    | (ESuc _ as e), (loc, ty) -> e, (loc, ty_of_ty_ ty)
+    | (ENatrec _ as e), (loc, ty) -> e, (loc, ty_of_ty_ ty)
     | EVar (x, i), (loc, ty) -> EVar (x, i), (loc, ty_of_ty_ ty)
     | EApp ((), t, u), (loc, ty) ->
       let t = f t in

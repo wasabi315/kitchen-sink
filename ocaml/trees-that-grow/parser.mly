@@ -2,7 +2,8 @@
 open Syntax
 %}
 
-%token LAM DOT LET EQ IN LPAREN RPAREN EOF
+%token LAM DOT LET EQ IN SUC NATREC LPAREN RPAREN EOF
+%token <int> NAT
 %token <string> ID
 
 %start <parsed> main
@@ -15,7 +16,10 @@ let main :=
 let atom :=
   | LPAREN; t = term; RPAREN; { t }
   | located(
-      v = ID; { EVar ((), v) }
+      | SUC; { ESuc () }
+      | NATREC; { ENatrec () }
+      | n = NAT; { ENat ((), n) }
+      | v = ID; { EVar ((), v) }
     )
 
 let spine :=
@@ -30,9 +34,14 @@ let lam :=
   )
 
 let _let :=
-  located(
-    LET; x = ID; EQ; t = term; IN; u = term; { ELet ((), x, t, u) }
-  )
+  bind = located(
+    LET; x = ID; EQ; t = term; { x, t }
+  );
+  IN;
+  u = term;
+  { let (x, t), loc = bind
+    in ELet ((), x, t, u), loc
+  }
 
 let term :=
   | lam

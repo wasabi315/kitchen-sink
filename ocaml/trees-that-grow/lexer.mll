@@ -7,6 +7,7 @@ exception Error
 let space = [' ' '\r' '\t']+
 let newline = '\r' | '\n' | "\r\n"
 let id = ['a'-'z' '_']['A'-'Z' 'a'-'z' '0'-'9' '_' '\'']*
+let nat = ['1'-'9']['0'-'9']* | '0'
 
 rule read = parse
   | space { read lexbuf }
@@ -16,8 +17,14 @@ rule read = parse
   | '=' { EQ }
   | '(' { LPAREN }
   | ')' { RPAREN }
-  | "let" { LET }
   | "in" { IN }
+  | "let" { LET }
+  | "suc" { SUC }
+  | "natrec" { NATREC }
+  | nat
+    { let s = Lexing.lexeme lexbuf in
+      NAT (int_of_string s)
+    }
   | id
     { let s = Lexing.lexeme lexbuf in
       ID s

@@ -1,0 +1,5 @@
+let nat_of_church = \n. n suc 0 in
+let czero = \s. \z. z in
+let csuc = \n. \s. \z. s (n s z) in
+let church_of_nat = natrec czero (\_. csuc) in
+church_of_nat (nat_of_church (\s. \z. s z))
