@@ -1,96 +1,116 @@
-{-# OPTIONS --cubical --guarded #-}
+{-# OPTIONS --guardedness --safe #-}
 
 module PartialColist where
 
-open import Cubical.Foundations.Everything
-open import Cubical.Data.Bool using ( Bool; true; false; if_then_else_; _and_; and-idem )
-
-open import LaterPrims
+open import Level
+open import Data.Bool using ( Bool; true; false )
+open import Data.Product using ( _×_; _,_ )
 
 private
   variable
     ℓ ℓ' : Level
-    A B : Type ℓ
+    A B : Set ℓ
+
+infixr 5 _∷_
+infix 4 _≈_ _∞≈_
 
 --------------------------------------------------------------------------------
 
-infixr 5 _∷_ _∷▹_
+data PartialColist (A : Set ℓ) : Set ℓ
+record ∞PartialColist (A : Set ℓ) : Set ℓ
 
-data PartialColist (A : Type ℓ) : Type ℓ where
+data PartialColist A where
   [] : PartialColist A
-  _∷_ : (x : A) (xs : ▹ PartialColist A) → PartialColist A
-  τ : (xs : ▹ PartialColist A) → PartialColist A
-  τ⁻ : ∀ xs → τ (next xs) ≡ xs
-  trunc : isSet (PartialColist A)
+  τ : (xs : ∞PartialColist A) → PartialColist A
+  _∷_ : (x : A) (xs : ∞PartialColist A) → PartialColist A
 
-_∷▹_ : A → PartialColist A → PartialColist A
-x ∷▹ xs = x ∷ next xs
+record ∞PartialColist A where
+  coinductive
+  constructor delay
+  field force : PartialColist A
+
+open ∞PartialColist
 
 ⊥ : PartialColist A
-⊥ = fix τ
-
-map : (A → B) → PartialColist A → PartialColist B
-map f [] = []
-map f (x ∷ xs) = f x ∷ λ α → map f (xs α)
-map f (τ xs) = τ λ α → map f (xs α)
-map f (τ⁻ xs i) = τ⁻ (map f xs) i
-map f (trunc xs ys p q i j) = trunc _ _ (cong (map f) p) (cong (map f) q) i j
-
-filter : (A → Bool) → PartialColist A → PartialColist A
-filter f [] = []
-filter f (x ∷ xs) = (if f x then (x ∷_) else τ) λ α → filter f (xs α)
-filter f (τ xs) = τ λ α → filter f (xs α)
-filter f (τ⁻ xs i) = τ⁻ (filter f xs) i
-filter f (trunc xs ys p q i j) = trunc _ _ (cong (filter f) p) (cong (filter f) q) i j
+∞⊥ : ∞PartialColist A
+⊥ = τ ∞⊥
+force ∞⊥ = τ ∞⊥
 
 --------------------------------------------------------------------------------
--- Properties
+-- Strong Bisimulation
 
-filter-eqᵗ : ∀ {f : A → Bool} {x}
-  → f x ≡ true
-  → ∀ xs → filter f (x ∷ xs) ≡ x ∷ λ α → filter f (xs α)
-filter-eqᵗ {f = f} {x} p xs =
-    (if f x then (x ∷_) else τ) (λ α → filter f (xs α))
-  ≡⟨ cong (if_then (x ∷_) else τ) p ≡$ (λ α → filter f (xs α)) ⟩
-    x ∷ (λ α → filter f (xs α))
-  ∎
+data _≈_ {A : Set ℓ} : (xs ys : PartialColist A) → Set ℓ
+record _∞≈_ {A : Set ℓ} (xs ys : ∞PartialColist A) : Set ℓ
 
-filter-eqᶠ : ∀ {f : A → Bool} {x}
-  → f x ≡ false
-  → ∀ xs → filter f (x ∷ xs) ≡ τ λ α → filter f (xs α)
-filter-eqᶠ {f = f} {x} p xs =
-    (if f x then (x ∷_) else τ) (λ α → filter f (xs α))
-  ≡⟨ cong (if_then (x ∷_) else τ) p ≡$ (λ α → filter f (xs α)) ⟩
-    τ (λ α → filter f (xs α))
-  ∎
+data _≈_ {A} where
+  [] : [] ≈ []
+  τ : ∀ {xs ys} (p : xs ∞≈ ys) → τ xs ≈ τ ys
+  _∷_ : ∀ x {xs ys} (p : xs ∞≈ ys) → x ∷ xs ≈ x ∷ ys
 
-filter-eqᶠ′ : ∀ {f : A → Bool} {x}
-  → f x ≡ false
-  → ∀ xs → filter f (x ∷ next xs) ≡ filter f xs
-filter-eqᶠ′ {f = f} {x} p xs =
-    filter f (x ∷ next xs)
-  ≡⟨ filter-eqᶠ p (next xs) ⟩
-    τ (λ _ → filter f xs)
-  ≡⟨ τ⁻ (filter f xs) ⟩
-    filter f xs
-  ∎
+record _∞≈_ xs ys where
+  coinductive
+  constructor delay
+  field force : force xs ≈ force ys
 
-filter-filter : ∀ (f g : A → Bool) xs
-  → filter f (filter g xs) ≡ filter (λ x → g x and f x) xs
-filter-filter f g [] = refl
-filter-filter f g (x ∷ xs) with g x
-... | false = cong τ (later-ext λ α → filter-filter f g (xs α))
-... | true = cong (if f x then x ∷_ else τ) (later-ext λ α → filter-filter f g (xs α))
-filter-filter f g (τ xs) = cong τ (later-ext λ α → filter-filter f g (xs α))
-filter-filter f g (τ⁻ xs i) j = τ⁻ (filter-filter f g xs j) i
-filter-filter f g (trunc xs ys p q i j) k =
-  trunc _ _ (λ l → filter-filter f g (p l) k) (λ l → filter-filter f g (q l) k) i j
+open _∞≈_
 
-filter-stable : ∀ (f : A → Bool) xs → filter f (filter f xs) ≡ filter f xs
-filter-stable f xs =
-    filter f (filter f xs)
-  ≡⟨ filter-filter f f xs ⟩
-    filter (λ x → f x and f x) xs
-  ≡⟨ cong filter (funExt λ x → and-idem (f x)) ≡$ xs ⟩
-    filter f xs
-  ∎
+≈-refl : {xs : PartialColist A} → xs ≈ xs
+∞≈-refl : {xs : ∞PartialColist A} → xs ∞≈ xs
+≈-refl {xs = []} = []
+≈-refl {xs = τ xs} = τ ∞≈-refl
+≈-refl {xs = x ∷ xs} = x ∷ ∞≈-refl
+force ∞≈-refl = ≈-refl
+
+≈-sym : {xs ys : PartialColist A} → xs ≈ ys → ys ≈ xs
+∞≈-sym : {xs ys : ∞PartialColist A} → xs ∞≈ ys → ys ∞≈ xs
+≈-sym [] = []
+≈-sym (τ p) = τ (∞≈-sym p)
+≈-sym (x ∷ p) = x ∷ ∞≈-sym p
+force (∞≈-sym p) = ≈-sym (force p)
+
+≈-trans : {xs ys zs : PartialColist A} → xs ≈ ys → ys ≈ zs → xs ≈ zs
+∞≈-trans : {xs ys zs : ∞PartialColist A} → xs ∞≈ ys → ys ∞≈ zs → xs ∞≈ zs
+≈-trans [] [] = []
+≈-trans (τ p) (τ q) = τ (∞≈-trans p q)
+≈-trans (x ∷ p) (.x ∷ q) = x ∷ ∞≈-trans p q
+force (∞≈-trans p q) = ≈-trans (force p) (force q)
+
+--------------------------------------------------------------------------------
+
+zip : PartialColist A → PartialColist B → PartialColist (A × B)
+∞zip : ∞PartialColist A → ∞PartialColist B → ∞PartialColist (A × B)
+zip (τ xs) (τ ys) = τ (∞zip xs ys)
+zip (τ xs) ys = τ (∞zip xs (delay ys))
+zip xs (τ ys) = τ (∞zip (delay xs) ys)
+zip [] ys = []
+zip xs [] = []
+zip (x ∷ xs) (y ∷ ys) = (x , y) ∷ ∞zip xs ys
+force (∞zip xs ys) = zip (force xs) (force ys)
+
+zip-⊥ˡ : {A B : Set ℓ} (xs : PartialColist B) → zip (⊥ {A = A}) xs ≈ ⊥
+∞zip-⊥ˡ : {A B : Set ℓ} (xs : ∞PartialColist B) → ∞zip (∞⊥ {A = A}) xs ∞≈ ∞⊥
+zip-⊥ˡ [] = τ (∞zip-⊥ˡ (delay []))
+zip-⊥ˡ (τ xs) = τ (∞zip-⊥ˡ xs)
+zip-⊥ˡ (x ∷ xs) = τ (∞zip-⊥ˡ (delay (x ∷ xs)))
+force (∞zip-⊥ˡ xs) = zip-⊥ˡ (force xs)
+
+zip-⊥ʳ : {A B : Set ℓ} (xs : PartialColist A) → zip xs (⊥ {A = B}) ≈ ⊥
+∞zip-⊥ʳ : {A B : Set ℓ} (xs : ∞PartialColist A) → ∞zip xs (∞⊥ {A = B}) ∞≈ ∞⊥
+zip-⊥ʳ [] = τ (∞zip-⊥ʳ (delay []))
+zip-⊥ʳ (τ xs) = τ (∞zip-⊥ʳ xs)
+zip-⊥ʳ (x ∷ xs) = τ (∞zip-⊥ʳ (delay (x ∷ xs)))
+force (∞zip-⊥ʳ xs) = zip-⊥ʳ (force xs)
+
+filter : (A → Bool) → PartialColist A → PartialColist A
+∞filter : (A → Bool) → ∞PartialColist A → ∞PartialColist A
+filter p [] = []
+filter p (τ xs) = τ (∞filter p xs)
+filter p (x ∷ xs) with p x
+... | true = x ∷ ∞filter p xs
+... | false = τ (∞filter p xs)
+force (∞filter p xs) = filter p (force xs)
+
+filter-⊥ : (p : A → Bool) → filter p ⊥ ≈ ⊥
+∞filter-⊥ : (p : A → Bool) → ∞filter p ∞⊥ ∞≈ ∞⊥
+filter-⊥ p = τ (∞filter-⊥ p)
+force (∞filter-⊥ p) = filter-⊥ p
