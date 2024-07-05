@@ -30,9 +30,9 @@ type SnocSymbol s c = AppendSymbol s (CharToSymbol c)
 type Split c s = SplitAux c "" (UnconsSymbol s)
 
 type family SplitAux c acc s where
-  SplitAux c acc 'Nothing = (acc, "")
-  SplitAux c acc ('Just (c, s)) = (acc, s)
-  SplitAux c acc ('Just (c', s)) = SplitAux c (SnocSymbol acc c') (UnconsSymbol s)
+  SplitAux c acc Nothing = (acc, "")
+  SplitAux c acc (Just (c, s)) = (acc, s)
+  SplitAux c acc (Just (c', s)) = SplitAux c (SnocSymbol acc c') (UnconsSymbol s)
 
 type Parse s = ParseAux1 [] (Split '%' s)
 
@@ -40,9 +40,9 @@ type family ParseAux1 acc s where
   ParseAux1 acc (s, s') = ParseAux2 (Snoc acc (Left s)) (UnconsSymbol s')
 
 type family ParseAux2 acc s where
-  ParseAux2 acc 'Nothing = acc
-  ParseAux2 acc ('Just ( '%', s)) = ParseAux1 (Snoc acc (Left (CharToSymbol '%'))) (Split '%' s)
-  ParseAux2 acc ('Just (c, s)) = ParseAux1 (Snoc acc (Right c)) (Split '%' s)
+  ParseAux2 acc Nothing = acc
+  ParseAux2 acc (Just ( '%', s)) = ParseAux1 (Snoc acc (Left (CharToSymbol '%'))) (Split '%' s)
+  ParseAux2 acc (Just (c, s)) = ParseAux1 (Snoc acc (Right c)) (Split '%' s)
 
 --------------------------------------------------------------------------------
 
@@ -101,6 +101,19 @@ printf = fprintf stdout
 
 --------------------------------------------------------------------------------
 
+data LogLevel = Debug | Info | Warning | Error
+
+log' :: LogLevel -> forall s -> (Ksprintf s (IO Unit) f) => f
+log' lvl = khprintf \f -> do
+  let prefix = case lvl of
+        Debug -> "\ESC[0;32m[DEBUG]: "
+        Info -> "\ESC[0;34m[INFO]: "
+        Warning -> "\ESC[0;33m[WARN]: "
+        Error -> "\ESC[0;31m[ERR]: "
+  hPutStr stderr prefix *> f stderr *> hPutStr stderr "\ESC[0m"
+
+--------------------------------------------------------------------------------
+
 main :: IO Unit
 main = do
   khprintf
@@ -108,7 +121,5 @@ main = do
     "%d + %d\n"
     (1 :: Int)
     (2 :: Int)
-  hprintf
-    "Hello, %s!\n"
-    "world"
-    stdout
+  log' Debug "Hello, %s!\n" "world"
+  log' Error "Main.hs:%d:%d undefined variable: %s\n" 100 42 "x"
