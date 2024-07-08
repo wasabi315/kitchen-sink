@@ -1,6 +1,6 @@
 {-# OPTIONS --cubical --guarded #-}
 
-open import Cubical.Foundations.Everything
+open import Cubical.Foundations.Everything hiding ( extend )
 open import IrrLaterPrims
 open import Cubical.Data.Nat
 
@@ -26,6 +26,11 @@ open Stream
 fromFun : (ℕ → A) → Stream A
 fromFun = fix λ f g → g 0 ∷ (f ⊛ next (g ∘ suc))
 
+repeat : A → Stream A
+repeat x = fix (x ∷_)
+
+--------------------------------------------------------------------------------
+
 map-body : ▹ ((A → B) → Stream A → Stream B) → (A → B) → Stream A → Stream B
 map-body map▹ f (x ∷ xs▹) = f x ∷ λ α → map▹ α f (xs▹ α)
 
@@ -36,6 +41,47 @@ map-eq : (f : A → B) (xs : Stream A)
   → map f xs ≡ f (head xs) ∷ map▹ (map f) (tail▹ xs)
 map-eq f xs = fix-path map-body ≡$ f ≡$ xs
 
+duplicate-body : ▹ (Stream A → Stream (Stream A)) → Stream A → Stream (Stream A)
+duplicate-body duplicate▹ xs = xs ∷ (duplicate▹ ⊛ tail▹ xs)
+
+duplicate : Stream A → Stream (Stream A)
+duplicate = fix duplicate-body
+
+duplicate-eq : (xs : Stream A)
+  → duplicate xs ≡ xs ∷ (map▹ duplicate (tail▹ xs))
+duplicate-eq xs = fix-path duplicate-body ≡$ xs
+
+extend : (Stream A → B) → Stream A → Stream B
+extend f xs = map f (duplicate xs)
+
+extend-eq : (f : Stream A → B) (xs : Stream A)
+  → extend f xs ≡ f xs ∷ (map▹ (extend f) (tail▹ xs))
+extend-eq f xs =
+    extend f xs
+  ≡⟨⟩
+    map f (duplicate xs)
+  ≡⟨ congS (map f) (duplicate-eq xs) ⟩
+    map f (xs ∷ (map▹ duplicate (tail▹ xs)))
+  ≡⟨ map-eq f _ ⟩
+    f xs ∷ map▹ (map f ∘ duplicate) (tail▹ xs)
+  ≡⟨⟩
+    f xs ∷ (map▹ (extend f) (tail▹ xs))
+  ∎
+
+--------------------------------------------------------------------------------
+
+<*>-body : ▹ (Stream (A → B) → Stream A → Stream B) → Stream (A → B) → Stream A → Stream B
+<*>-body <*>▹ (f ∷ fs▹) (x ∷ xs▹) = f x ∷ (<*>▹ ⊛ fs▹ ⊛ xs▹)
+
+_<*>_ : Stream (A → B) → Stream A → Stream B
+_<*>_ = fix <*>-body
+
+<*>-eq : (fs : Stream (A → B)) (xs : Stream A)
+  → fs <*> xs ≡ head fs (head xs) ∷ (map▹ _<*>_ (tail▹ fs) ⊛ tail▹ xs)
+<*>-eq fs xs = fix-path <*>-body ≡$ fs ≡$ xs
+
+--------------------------------------------------------------------------------
+
 predict-body : ▹ (▹ Stream A → Stream (▹ A)) → ▹ Stream A → Stream (▹ A)
 predict-body predict▹ xs▹ = (map▹ head xs▹) ∷ (predict▹ ⊛ map▹ tail▹ xs▹)
 
@@ -45,6 +91,21 @@ predict = fix predict-body
 predict-eq : (xs▹ : ▹ Stream A)
   → predict xs▹ ≡ (map▹ head xs▹) ∷ (map▹ (predict ∘ tail▹) xs▹)
 predict-eq xs▹ = fix-path predict-body ≡$ xs▹
+
+--------------------------------------------------------------------------------
+
+data Coℕ : Type where
+  zero : Coℕ
+  suc : ▹ Coℕ → Coℕ
+
+cfix : (Stream (▹ A) → A) → Stream A
+cfix f = fix (extend f ∘ predict)
+
+kfix : Stream (Stream (▹ A) → A) → Stream A
+kfix w = fix λ xs → w <*> duplicate (predict xs)
+
+--------------------------------------------------------------------------------
+-- predict is an isomorphism
 
 predict⁻-body : ▹ (Stream (▹ A) → ▹ Stream A) → Stream (▹ A) → ▹ Stream A
 predict⁻-body predict⁻▹ x▹s = map▹ _∷_ (head x▹s) ⊛ (predict⁻▹ ⊛ tail▹ x▹s)
