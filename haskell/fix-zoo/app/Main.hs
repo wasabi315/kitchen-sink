@@ -1,5 +1,6 @@
 {-# LANGUAGE BlockArguments #-}
 {-# LANGUAGE DerivingVia #-}
+{-# LANGUAGE StandaloneDeriving #-}
 
 import Control.Comonad (Comonad (..), ComonadApply (..))
 import Data.Functor.Identity
@@ -38,9 +39,6 @@ instance MonadFix Maybe where
 loeb :: (Functor f) => f (f a -> a) -> f a
 loeb f = fix \u -> fmap ($ u) f
 
-moeb :: (((a -> b) -> b) -> c -> a) -> c -> a
-moeb f x = fix \u -> f ($ u) x
-
 --------------------------------------------------------------------------------
 
 cfix :: (Comonad w) => (w a -> a) -> w a
@@ -66,11 +64,11 @@ lfix f = fix (f . pure)
 class Predictable f where
   predict :: Later (f a) -> f (Later a)
 
-instance (Representable f) => Predictable (Co f) where
-  predict w = tabulate \i -> index <$> w <*> pure i
-
 lcfix :: (Comonad w, Predictable w) => (w (Later a) -> a) -> w a
 lcfix f = lfix (extend f . predict)
+
+lwfix :: (Comonad w, Predictable w) => w (w (Later a) -> a) -> a
+lwfix = lfix \f w -> extract w (predict (flip extend w <$> f))
 
 lkfix :: (ComonadApply w, Predictable w) => w (w (Later a) -> a) -> w a
 lkfix w = lfix \u -> w <@> duplicate (predict u)
@@ -82,6 +80,9 @@ infixr 5 :>
 
 fromFun :: (Natural -> a) -> Stream a
 fromFun = lfix \f g -> g 0 :> (f <*> pure (g . succ))
+
+srepeat :: a -> Stream a
+srepeat x = lfix (x :>)
 
 shead :: Stream a -> a
 shead (x :> _) = x
@@ -96,15 +97,12 @@ instance Comonad Stream where
 
 instance Applicative Stream where
   pure x = lfix (x :>)
-  (<*>) = lfix \a fs xs -> (shead fs (shead xs)) :> (a <*> stail fs <*> stail xs)
+  (<*>) = lfix \a fs xs -> (shead fs $ shead xs) :> (a <*> stail fs <*> stail xs)
 
 instance ComonadApply Stream
 
 instance Predictable Stream where
   predict = lfix \p xs -> (shead <$> xs) :> (p <*> (stail <$> xs))
-
-predictInv :: Stream (Later a) -> Later (Stream a)
-predictInv = lfix \p xs -> (:>) <$> shead xs <*> (p <*> stail xs)
 
 --------------------------------------------------------------------------------
 
