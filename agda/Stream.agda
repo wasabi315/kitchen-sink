@@ -94,12 +94,11 @@ predict-eq xs▹ = fix-path predict-body ≡$ xs▹
 
 --------------------------------------------------------------------------------
 
-data Coℕ : Type where
-  zero : Coℕ
-  suc : ▹ Coℕ → Coℕ
-
 cfix : (Stream (▹ A) → A) → Stream A
 cfix f = fix (extend f ∘ predict)
+
+wfix : Stream (Stream (▹ A) → A) → A
+wfix = fix λ wfix▹ xs → head xs (predict (map▹ (flip extend xs) wfix▹))
 
 kfix : Stream (Stream (▹ A) → A) → Stream A
 kfix w = fix λ xs → w <*> duplicate (predict xs)
