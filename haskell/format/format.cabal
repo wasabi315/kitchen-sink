@@ -23,5 +23,4 @@ executable debruijn
     hs-source-dirs: app
     main-is: Main.hs
     build-depends:
-        base >=4.20,
-        ghc-experimental
+        base >=4.20

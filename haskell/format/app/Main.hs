@@ -1,27 +1,27 @@
 {-# LANGUAGE AllowAmbiguousTypes #-}
 {-# LANGUAGE BlockArguments #-}
 {-# LANGUAGE DataKinds #-}
+{-# LANGUAGE GADTs #-}
+{-# LANGUAGE PartialTypeSignatures #-}
 {-# LANGUAGE QuantifiedConstraints #-}
 {-# LANGUAGE RequiredTypeArguments #-}
 {-# LANGUAGE TypeApplications #-}
-{-# LANGUAGE NoListTuplePuns #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE UndecidableInstances #-}
-{-# LANGUAGE PartialTypeSignatures #-}
 
-import Prelude.Experimental
 import Data.Kind
 import Data.Proxy
 import GHC.TypeError
 import GHC.TypeLits
 import System.IO
+import Text.Show.Functions ()
 
 --------------------------------------------------------------------------------
 -- Parser
 
 type family Snoc xs x where
-  Snoc [] x = [x]
-  Snoc (x : xs) y = x : Snoc xs y
+  Snoc '[] x = '[x]
+  Snoc (x ': xs) y = x ': Snoc xs y
 
 type CharToSymbol c = ConsSymbol c ""
 
@@ -30,80 +30,102 @@ type SnocSymbol s c = AppendSymbol s (CharToSymbol c)
 type Split c s = SplitAux c "" (UnconsSymbol s)
 
 type family SplitAux c acc s where
-  SplitAux c acc Nothing = (acc, "")
-  SplitAux c acc (Just (c, s)) = (acc, s)
-  SplitAux c acc (Just (c', s)) = SplitAux c (SnocSymbol acc c') (UnconsSymbol s)
+  SplitAux c acc Nothing = '(acc, "")
+  SplitAux c acc (Just '(c, s)) = '(acc, s)
+  SplitAux c acc (Just '(c', s)) = SplitAux c (SnocSymbol acc c') (UnconsSymbol s)
 
-type Parse s = ParseAux1 [] (Split '%' s)
+type Parse s = ParseAux1 '[] (Split '%' s)
 
 type family ParseAux1 acc s where
-  ParseAux1 acc (s, s') = ParseAux2 (Snoc acc (Left s)) (UnconsSymbol s')
+  ParseAux1 acc '(s, s') = ParseAux2 (Snoc acc (Left s)) (UnconsSymbol s')
 
 type family ParseAux2 acc s where
   ParseAux2 acc Nothing = acc
-  ParseAux2 acc (Just ( '%', s)) = ParseAux1 (Snoc acc (Left (CharToSymbol '%'))) (Split '%' s)
-  ParseAux2 acc (Just (c, s)) = ParseAux1 (Snoc acc (Right c)) (Split '%' s)
+  ParseAux2 acc (Just '( '%', s)) = ParseAux1 (Snoc acc (Left (CharToSymbol '%'))) (Split '%' s)
+  ParseAux2 acc (Just '(c, s)) = ParseAux1 (Snoc acc (Right c)) (Split '%' s)
 
 --------------------------------------------------------------------------------
 
 type FormatArg :: Char -> Type -> Constraint
 class FormatArg c a where
-  formatArg :: a -> ShowS
+  formatArg :: a -> String
 
 instance (Integral a) => FormatArg 'd' a where
-  formatArg = shows @Integer . fromIntegral
+  formatArg = show @Integer . fromIntegral
 
 instance (a ~ String) => FormatArg 's' a where
-  formatArg = showString
+  formatArg = id
 
 type UnsupportedFormatSpecifierMsg c = 'Text "Unsupported format specifier: " :<>: 'ShowType c
 
 instance {-# OVERLAPPABLE #-} (Unsatisfiable (UnsupportedFormatSpecifierMsg c)) => FormatArg c a where
   formatArg = unsatisfiable
 
-type FormatFun :: List (Either Symbol Char) -> Type -> Type -> Constraint
-class FormatFun fmt a f where
-  formatFun :: ShowS -> (String -> a) -> f
+data Format f a where
+  End :: Format a a
+  Str :: String -> Format f a -> Format f a
+  Hole :: (x -> String) -> Format f a -> Format (x -> f) a
 
-instance (a ~ b) => FormatFun [] a b where
-  formatFun acc k = k (acc "")
+deriving instance Show (Format f a)
 
-instance (KnownSymbol s, FormatFun fmt a f) => FormatFun (Left s : fmt) a f where
-  formatFun acc = formatFun @fmt (acc . showString (symbolVal @s Proxy))
+infixr 5 @@
 
-instance (g ~ (x -> f), FormatArg c x, FormatFun fmt a f) => FormatFun (Right c : fmt) a g where
-  formatFun acc k arg = formatFun @fmt (acc . formatArg @c arg) k
+(@@) :: Format a b -> Format b c -> Format a c
+End @@ fmt' = fmt'
+Str s fmt @@ fmt' = Str s (fmt @@ fmt')
+Hole f fmt @@ fmt' = Hole f (fmt @@ fmt')
+
+type ToFormat' :: [Either Symbol Char] -> Type -> Type -> Constraint
+class ToFormat' fmt f a where
+  toFormat' :: Format f a
+
+instance (a ~ b) => ToFormat' '[] a b where
+  toFormat' = End
+
+instance (KnownSymbol s, ToFormat' fmt f a) => ToFormat' (Left s ': fmt) f a where
+  toFormat' = Str (symbolVal @s Proxy) (toFormat' @fmt)
+
+instance (g ~ (x -> f), FormatArg c x, ToFormat' fmt f a) => ToFormat' (Right c ': fmt) g a where
+  toFormat' = Hole (formatArg @c) (toFormat' @fmt)
+
+type ToFormat s = ToFormat' (Parse s)
+
+toFormat :: forall s -> (ToFormat s f a) => Format f a
+toFormat s = toFormat' @(Parse s)
 
 --------------------------------------------------------------------------------
 
-type Ksprintf s = FormatFun (Parse s)
+ksprintf' :: (String -> a) -> Format f a -> f
+ksprintf' k End = k ""
+ksprintf' k (Str s fmt) = ksprintf' (\s' -> k (s ++ s')) fmt
+ksprintf' k (Hole f fmt) = \x -> ksprintf' (\s -> k (f x ++ s)) fmt
 
-ksprintf :: (String -> a) -> forall s -> (Ksprintf s a f) => f
-ksprintf k s = formatFun @(Parse s) id k
+ksprintf :: (String -> a) -> forall s -> (ToFormat s f a) => f
+ksprintf k s = ksprintf' k (toFormat s)
 
-sprintf :: forall s -> (Ksprintf s String f) => f
+sprintf :: forall s -> (ToFormat s f String) => f
 sprintf = ksprintf id
 
-khprintf :: ((Handle -> IO Unit) -> a) -> forall s -> (Ksprintf s a f) => f
+khprintf :: ((Handle -> IO ()) -> a) -> forall s -> (ToFormat s f a) => f
 khprintf k = ksprintf \s -> k \h -> hPutStr h s
 
-hprintf :: forall s -> (Ksprintf s (Handle -> IO Unit) f) => f
+hprintf :: forall s -> (ToFormat s f (Handle -> IO ())) => f
 hprintf = khprintf id
 
-kfprintf :: (Handle -> IO Unit) -> Handle -> forall s -> (Ksprintf s (IO Unit) f) => f
+kfprintf :: (Handle -> IO ()) -> Handle -> forall s -> (ToFormat s f (IO ())) => f
 kfprintf k h = khprintf \f -> f h *> k h
 
-fprintf :: Handle -> forall s -> (Ksprintf s (IO Unit) f) => f
+fprintf :: Handle -> forall s -> (ToFormat s f (IO ())) => f
 fprintf = kfprintf \_ -> pure ()
 
-printf :: forall s -> (Ksprintf s (IO Unit) f) => f
+printf :: forall s -> (ToFormat s f (IO ())) => f
 printf = fprintf stdout
 
 --------------------------------------------------------------------------------
 
 data LogLevel = Debug | Info | Warning | Error
 
-log' :: LogLevel -> forall s -> (Ksprintf s (IO Unit) f) => f
+log' :: LogLevel -> forall s -> (ToFormat s f (IO ())) => f
 log' lvl = khprintf \f -> do
   let prefix = case lvl of
         Debug -> "\ESC[0;32m[DEBUG]: "
@@ -114,7 +136,7 @@ log' lvl = khprintf \f -> do
 
 --------------------------------------------------------------------------------
 
-main :: IO Unit
+main :: IO ()
 main = do
   khprintf
     (\f -> f stdout *> f stderr)
