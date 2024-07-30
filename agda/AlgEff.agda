@@ -2,15 +2,15 @@ module AlgEff where
 
 open import Data.Empty using ( ⊥; ⊥-elim )
 open import Data.Nat using ( ℕ; zero; suc; _<_; _≤?_; z≤n; s≤s )
+open import Data.Product using ( _×_ )
+open import Data.Unit using ( ⊤ )
 open import Function using ( flip; _$_; _∘′_ )
 open import Relation.Binary.Construct.Closure.ReflexiveTransitive as Star using ( Star; ε; _◅_ )
 open import Relation.Binary.Construct.Closure.ReflexiveTransitive.Properties using ( module StarReasoning )
 open import Relation.Binary.PropositionalEquality
   using ( _≡_; refl; sym; trans; cong; cong₂; module ≡-Reasoning )
-  renaming ( subst to transport )
-open import Relation.Binary.HeterogeneousEquality using ( _≅_ ) renaming ( refl to hrefl )
 open import Relation.Nullary using ( ¬_ )
-open import Relation.Nullary.Decidable using ( True; toWitness )
+open import Relation.Nullary.Decidable using ( True; toWitness; Dec; yes; ¬? )
 
 --------------------------------------------------------------------------------
 
@@ -20,6 +20,7 @@ data BaseTy : Set where
 record Sig : Set₁ where
   field
     Op : Set
+    decEq : (x y : Op) → Dec (x ≡ y)
     Dom : Op → BaseTy
     Cod : Op → BaseTy
 
@@ -29,7 +30,7 @@ module M (Σ : Sig) where
 
   infixr 7 _⇒_!_
   infix  4 _∋_ _∋ₑ_
-  infixl 5 _,_
+  infixl 5 _,_ _,#_
   infix  5 ƛ_
   infixl 7 _·_
   infix  9 #_
@@ -37,6 +38,7 @@ module M (Σ : Sig) where
 
   data Ty : Set
   data Eff : Set
+  fresh : Op Σ → Eff → Set
 
   data Ty where
     `ℕ : Ty
@@ -44,7 +46,12 @@ module M (Σ : Sig) where
 
   data Eff where
     ι : Eff
-    _,_ : Eff → Op Σ → Eff
+    cons : (E : Eff) (op : Op Σ) → fresh op E → Eff
+
+  pattern _,#_ E op = cons E op _
+
+  fresh op ι = ⊤
+  fresh op (E ,# op') = True (¬? (decEq Σ op op')) × fresh op E
 
   data Ctx : Set where
     ∅ : Ctx
@@ -69,8 +76,8 @@ module M (Σ : Sig) where
     suc : Γ ∋ α → Γ , β ∋ α
 
   data _∋ₑ_ : Eff → Op Σ → Set where
-    zero : E , op ∋ₑ op
-    suc : E ∋ₑ op → E , op' ∋ₑ op
+    zero : ∀ {p} → cons E op p ∋ₑ op
+    suc : ∀ {p} → E ∋ₑ op → cons E op' p ∋ₑ op
 
   data Term : Ctx → Eff → Ty → Set
   record Handler (Γ : Ctx) (E E' : Eff) (α β : Ty) : Set
@@ -330,13 +337,14 @@ data ExOp : Set where
 
 exSig : Sig
 Op exSig = ExOp
+decEq exSig exOp exOp = yes refl
 Dom exSig exOp = `ℕ
 Cod exSig exOp = `ℕ
 
 open M exSig
 
 -- {return x. x} ⊎ {exOp x k. k (k x)}
-exHandler : Handler ∅ (ι , exOp) ι `ℕ `ℕ
+exHandler : Handler ∅ (ι ,# exOp) ι `ℕ `ℕ
 valh exHandler = # 0
 effh exHandler zero = # 0 · (# 0 · # 1)
 

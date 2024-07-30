@@ -7,8 +7,6 @@ open import Relation.Binary.Construct.Closure.ReflexiveTransitive as Star using 
 open import Relation.Binary.Construct.Closure.ReflexiveTransitive.Properties using ( module StarReasoning )
 open import Relation.Binary.PropositionalEquality
   using ( _≡_; refl; sym; trans; cong; cong₂; module ≡-Reasoning )
-  renaming ( subst to transport )
-open import Relation.Binary.HeterogeneousEquality using ( _≅_ ) renaming ( refl to hrefl )
 open import Relation.Nullary using ( ¬_ )
 open import Relation.Nullary.Decidable using ( True; toWitness )
 
@@ -56,9 +54,6 @@ data Term : Ctx → Eff → Ty → Set where
   zero : Term Γ E `ℕ
   suc : Term Γ E `ℕ → Term Γ E `ℕ
   case : Term Γ E α → Term (Γ , `ℕ) E α → Term Γ E `ℕ → Term Γ E α
-
-PureTerm : Ctx → Ty → Set
-PureTerm Γ α = ∀ {E} → Term Γ E α
 
 length : Ctx → ℕ
 length ∅ = 0

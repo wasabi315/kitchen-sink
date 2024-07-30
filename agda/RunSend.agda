@@ -7,8 +7,6 @@ open import Relation.Binary.Construct.Closure.ReflexiveTransitive as Star using 
 open import Relation.Binary.Construct.Closure.ReflexiveTransitive.Properties using ( module StarReasoning )
 open import Relation.Binary.PropositionalEquality
   using ( _≡_; refl; sym; trans; cong; cong₂; module ≡-Reasoning )
-  renaming ( subst to transport )
-open import Relation.Binary.HeterogeneousEquality using ( _≅_ ) renaming ( refl to hrefl )
 open import Relation.Nullary using ( ¬_ )
 open import Relation.Nullary.Decidable using ( True; toWitness )
 
@@ -31,7 +29,7 @@ data Ty where
 
 data Eff where
   ι : Eff
-  _⭆_ : Ty → Ty → Eff
+  _➡_ : Ty → Ty → Eff
 
 data Ctx : Set where
   ∅ : Ctx
@@ -51,8 +49,8 @@ data Term : Ctx → Eff → Ty → Set where
   var : Γ ∋ α → Term Γ E α
   ƛ_ : Term (Γ , α) E β → Term Γ E' (α ⇒ β ! E)
   _·_ : Term Γ E (α ⇒ β ! E) → Term Γ E α → Term Γ E β
-  send : Term Γ (α ⭆ β) α → Term Γ (α ⭆ β) β
-  run : Term Γ (α ⭆ β) γ → Term (Γ , α , β ⇒ γ ! E) E γ → Term Γ E γ
+  send : Term Γ (α ➡ β) α → Term Γ (α ➡ β) β
+  run : Term Γ (α ➡ β) γ → Term (Γ , α , β ⇒ γ ! E) E γ → Term Γ E γ
   zero : Term Γ E `ℕ
   suc : Term Γ E `ℕ → Term Γ E `ℕ
   case : Term Γ E α → Term (Γ , `ℕ) E α → Term Γ E `ℕ → Term Γ E α
@@ -150,7 +148,7 @@ data InCtx (h : Term Γ Eₕ αₕ) : Term Γ E α → Set where
     → Value v
     → InCtx h u
     → InCtx h (v · u)
-  send : {t : Term Γ (α ⭆ β) α}
+  send : {t : Term Γ (α ➡ β) α}
     → InCtx h t
     → InCtx h (send t)
   suc : {t : Term Γ E `ℕ}
@@ -191,11 +189,11 @@ data _⟶_ : Term Γ E α → Term Γ E α → Set where
     → (v : Value u)
     → (ƛ t) · u ⟶ t [ coe v ]
 
-  β-run₁ : {t : Term Γ (α ⭆ β) γ} {u : Term (Γ , α , β ⇒ γ ! E) E γ}
+  β-run₁ : {t : Term Γ (α ➡ β) γ} {u : Term (Γ , α , β ⇒ γ ! E) E γ}
     → (v : Value t)
     → run t u ⟶ coe v
 
-  β-run₂ : {s : Term Γ (α ⭆ β) γ} {t : Term Γ (α ⭆ β) α} {u : Term (Γ , α , β ⇒ γ ! E) E γ}
+  β-run₂ : {s : Term Γ (α ➡ β) γ} {t : Term Γ (α ➡ β) α} {u : Term (Γ , α , β ⇒ γ ! E) E γ}
     → (c : InCtx (send t) s)
     → (v : Value t)
     → run s u ⟶ ((u [ ƛ run (↑⟨⟩ (↑⟨⟩ c) ⟨ # 0 ⟩) (rename (ext (ext (suc ∘′ suc))) u) ]) [ coe v ])
@@ -216,11 +214,11 @@ data _⟶_ : Term Γ E α → Term Γ E α → Set where
     → t ⟶ t'
     → v · t ⟶ v · t'
 
-  ξ-send : {t t' : Term Γ (α ⭆ β) α}
+  ξ-send : {t t' : Term Γ (α ➡ β) α}
     → t ⟶ t'
     → send t ⟶ send t'
 
-  ξ-run : {t t' : Term Γ (α ⭆ β) γ} {u : Term (Γ , α , β ⇒ γ ! E) E γ}
+  ξ-run : {t t' : Term Γ (α ➡ β) γ} {u : Term (Γ , α , β ⇒ γ ! E) E γ}
     → t ⟶ t'
     → run t u ⟶ run t' u
 
@@ -268,7 +266,7 @@ _ =
 data Progress : Term ∅ E α → Set where
   done : {t : Term ∅ E α} → Value t → Progress t
   step : {t t' : Term ∅ E α} → t ⟶ t' → Progress t
-  bare-send : {t : Term ∅ (α ⭆ β) γ} {u : Term ∅ (α ⭆ β) α}
+  bare-send : {t : Term ∅ (α ➡ β) γ} {u : Term ∅ (α ➡ β) α}
     → Value u
     → InCtx (send u) t
     → Progress t
@@ -311,12 +309,12 @@ V-unique (ƛ t) (ƛ .t) = refl
 V-unique zero zero = refl
 V-unique (suc v) (suc v') = cong suc (V-unique v v')
 
-V¬⟨send⟩ : {t : Term Γ E α} {u : Term Γ (β ⭆ γ) β}
+V¬⟨send⟩ : {t : Term Γ E α} {u : Term Γ (β ➡ γ) β}
   → Value t
   → ¬ InCtx (send u) t
 V¬⟨send⟩ (suc v) (suc c) = V¬⟨send⟩ v c
 
-⟨send⟩¬⟶ : {u : Term Γ (α ⭆ β) α} {t t' : Term Γ E γ}
+⟨send⟩¬⟶ : {u : Term Γ (α ➡ β) α} {t t' : Term Γ E γ}
   → Value u
   → InCtx (send u) t
   → ¬ (t ⟶ t')
