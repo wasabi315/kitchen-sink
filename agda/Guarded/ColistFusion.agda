@@ -1,6 +1,6 @@
 {-# OPTIONS --cubical --guarded #-}
 
-module ColistFusion where
+module Guarded.ColistFusion where
 
 open import Cubical.Foundations.Everything
 open import Cubical.Data.Empty using ( ⊥ )
@@ -9,7 +9,7 @@ open import Cubical.Data.Unit.Base using ( Unit; tt )
 open import Cubical.Data.Sigma.Base using ( _×_; _,_ )
 open import Cubical.Relation.Binary.Base using ( Rel; graphRel )
 
-open import IrrLaterPrims
+open import Guarded.IrrPrims
 
 private
   variable

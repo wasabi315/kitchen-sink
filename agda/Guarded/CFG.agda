@@ -2,9 +2,9 @@
 
 {-# OPTIONS --guarded --cubical #-}
 
-module CFG where
+module Guarded.CFG where
 
-open import Cubical.Foundations.Everything hiding ( Partial )
+open import Cubical.Foundations.Everything
 open import Cubical.Data.Bool using ( Dec→Bool; if_then_else_ )
 open import Cubical.Data.Int using ( ℤ; pos; neg; _+_; discreteℤ )
 open import Cubical.Data.List using ( List; []; _∷_ )
@@ -13,7 +13,8 @@ open import Cubical.Data.Vec using ( Vec; []; _∷_ )
 open import Cubical.Data.Sigma using ( _×_; _,_ )
 open import Cubical.Relation.Nullary using ( Dec; yes; no )
 
-open import LaterPrims
+open import Guarded.Prims
+open import Guarded.Partial
 
 private
   variable
@@ -58,21 +59,6 @@ unlabel (label-discard c₁ c₂ i) = unlabel c₁
 
 --------------------------------------------------------------------------------
 
-infixl 5 _>>=_
-
-data Partial (A : Set) : Set where
-  now : A → Partial A
-  later : ▹ Partial A → Partial A
-
-return : A → Partial A
-return = now
-
-_>>=_ : Partial A → (A → Partial B) → Partial B
-now x >>= f = f x
-later x >>= f = later λ α → x α >>= f
-
---------------------------------------------------------------------------------
-
 data Instr : Set where
   push : ℤ → Instr
   add store load pop : Instr
@@ -101,7 +87,7 @@ data Expr : Set where
   get : Expr
   while : Expr → Expr → Expr
 
-eval : Expr → ℤ → Partial (ℤ × ℤ)
+eval : Expr → ℤ → Part (ℤ × ℤ)
 eval (val n) s = return (n , s)
 eval (x `+ y) s = do
   m , s₁ ← eval x s
@@ -121,7 +107,7 @@ eval (while x y) = fix λ f▹ s → do
 
 --------------------------------------------------------------------------------
 
-execᵗ : Tree Instr Term → (List ℤ × ℤ) → Partial (List ℤ × ℤ)
+execᵗ : Tree Instr Term → (List ℤ × ℤ) → Part (List ℤ × ℤ)
 execᵗ (push n ∷ t) (ss , s) = execᵗ t (n ∷ ss , s)
 execᵗ (add ∷ t) (m ∷ n ∷ ss , s) = execᵗ t ((n + m) ∷ ss , s)
 execᵗ (store ∷ t) (n ∷ ss , _) = execᵗ t (ss , n)
@@ -160,16 +146,19 @@ compᵍ get c = load ∷ c
 compᵍ (while x y) c =
     jmpᵍ l₁
   label[ l₁ , l₁ ]
-    (compᵍ x (jpzᵍ l₃ l₂)
+    (compᵍ x
+    (jpzᵍ l₃ l₂)
   label[ l₂ , _ ]
-    compᵍ y (pop ∷ jmpᵍ l₁)
+    compᵍ y
+    (pop ∷
+    jmpᵍ l₁)
   label[ l₃ , _ ]
     c)
 
 compileᵍ : ∀ {L} → Expr → CFG L Instr Term
 compileᵍ e = compᵍ e retᵍ
 
-execᵍ : (∀ {L} → CFG L Instr Term) → (List ℤ × ℤ) → Partial (List ℤ × ℤ)
+execᵍ : (∀ {L} → CFG L Instr Term) → (List ℤ × ℤ) → Part (List ℤ × ℤ)
 execᵍ c conf = execᵗ (unlabel c) conf
 
 --------------------------------------------------------------------------------

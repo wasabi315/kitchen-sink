@@ -1,6 +1,6 @@
 {-# OPTIONS --cubical --guarded #-}
 
-module IrrLaterPrims where
+module Guarded.Prims where
 
 open import Cubical.Foundations.Prelude
 open import Cubical.Foundations.HLevels
@@ -24,11 +24,11 @@ postulate
   Tick : LockU
 
 ▹_ : Type ℓ → Type ℓ
-▹_ A = (@tick @irr α : Tick) -> A  -- Note @irr!
+▹_ A = (@tick α : Tick) -> A
 infix 2 ▹_
 
 ▸_ : ▹ Type ℓ → Type ℓ
-▸ A = (@tick @irr α : Tick) → A α  -- Note @irr!
+▸ A = (@tick α : Tick) → A α
 infix 2 ▸_
 
 ▸-syntax = ▸_
@@ -64,7 +64,7 @@ hcompLater-test : ∀ (A : ▹ Type ℓ) φ (u : I → Partial φ (▸ A))
   → (u0 : (▸ A) [ φ ↦ u i0 ]) → hcompLater A φ u u0 ≡ hcompLater-prim A φ u u0
 hcompLater-test A φ u x _ = hcompLater-prim A φ u x
 
-later-ext : {f g : ▹ A} → (▸ λ α → f α ≡ g α) → f ≡ g
+later-ext : {f g : ▹ A} → ▸[ α ] f α ≡ g α → f ≡ g
 later-ext eq i α = eq α i
 
 later-ext⁻ : {f g : ▹ A} → f ≡ g → ▸[ α ] f α ≡ g α
@@ -115,9 +115,3 @@ isOfHLevel▹ (suc (suc n)) p x y =
     (λ eq▹ i α → eq▹ α i)
     (λ _ → refl)
     (isOfHLevel▹ (suc n) λ α → p α (x α) (y α))
-
---------------------------------------------------------------------------------
-
--- tick-irr holds definitionally
-tick-irr : (x : ▹ A) → ▸[ α ] ▸[ β ] x α ≡ x β
-tick-irr x i j = refl
