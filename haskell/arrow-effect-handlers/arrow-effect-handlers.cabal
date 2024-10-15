@@ -23,9 +23,9 @@ library
     hs-source-dirs: src
     exposed-modules:
         Control.Arrow.Effect
-        Control.Arrow.Effect.ArrowApply
-        Control.Arrow.Effect.Final
-        Control.Arrow.Effect.MoreInputs
+        Control.Arrow.Effect.State
+        Control.Arrow.Effect.Reader
+        Control.Arrow.Effect.Nondet
     build-depends:
         base >=4.16
 

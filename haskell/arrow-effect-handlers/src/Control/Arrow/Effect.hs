@@ -4,10 +4,16 @@
 {-# LANGUAGE RecordWildCards #-}
 
 module Control.Arrow.Effect
-  ( Eff (..),
+  ( module Control.Category,
+    module Control.Arrow,
+    Eff (..),
     Handler (..),
     handleWith,
     interpret,
+    unit,
+    ununit,
+    assoc,
+    unassoc,
   )
 where
 
@@ -26,10 +32,10 @@ ununit :: (Arrow a) => a (b, ()) b
 ununit = arr fst
 
 assoc :: (Arrow a) => a ((b, c), d) (b, (c, d))
-assoc = arr \((b, c), d) -> (b, (c, d))
+assoc = arr \ ~(~(b, c), d) -> (b, (c, d))
 
 unassoc :: (Arrow a) => a (b, (c, d)) ((b, c), d)
-unassoc = arr \(b, (c, d)) -> ((b, c), d)
+unassoc = arr \ ~(b, ~(c, d)) -> ((b, c), d)
 
 --------------------------------------------------------------------------------
 -- Effectful Arrows and Handlers
