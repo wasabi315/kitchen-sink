@@ -10,10 +10,6 @@ module Control.Arrow.Effect
     Handler (..),
     handleWith,
     interpret,
-    unit,
-    ununit,
-    assoc,
-    unassoc,
   )
 where
 

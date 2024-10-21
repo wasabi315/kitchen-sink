@@ -28,18 +28,24 @@ local f a = Op (Local f a)
 
 --------------------------------------------------------------------------------
 
-newtype ReaderC r a b c = ReaderC {unReaderC :: a (r, b) c}
+newtype ReaderC r a b c = ReaderC {unReaderC :: a (b, r) c}
 
 instance (Arrow a) => Category (ReaderC r a) where
-  id = ReaderC $ arr snd
-  ReaderC f . ReaderC g = ReaderC (arr (\ ~(r, b) -> (r, (r, b))) >>> second g >>> f)
+  id = ReaderC $ arr fst
+  ReaderC f . ReaderC g = ReaderC (f . first g . arr dup)
+
+dup :: (Arrow a) => a (b, c) ((b, c), c)
+dup = arr \ ~(b, c) -> ((b, c), c)
+
+swp :: (Arrow a) => a ((b, c), d) ((b, d), c)
+swp = arr \ ~(~(b, c), d) -> ((b, d), c)
 
 instance (Arrow a) => Arrow (ReaderC r a) where
-  arr f = ReaderC $ arr (f . snd)
-  first (ReaderC f) = ReaderC (unassoc >>> first f)
+  arr f = ReaderC $ arr (f . fst)
+  first (ReaderC f) = ReaderC (swp >>> first f)
 
-runReader :: (Arrow a) => Eff (Reader r) b c -> a (r, b) c
+runReader :: (Arrow a) => Eff (Reader r) b c -> a (b, r) c
 runReader =
   unReaderC . interpret \case
-    Ask -> ReaderC $ arr fst
-    Local f a -> ReaderC $ arr (first f) >>> runReader a
+    Ask -> ReaderC $ arr snd
+    Local f a -> ReaderC $ arr (second f) >>> runReader a
