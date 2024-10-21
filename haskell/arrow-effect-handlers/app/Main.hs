@@ -16,18 +16,24 @@ main = do
 
 --------------------------------------------------------------------------------
 
+-- |
+-- prop> testReader ((), n) == 2 * n + 1
 testReader :: ((), Int) -> Int
 testReader = runReader proc () -> do
   r <- ask -< ()
   r' <- local (+ 1) ask -< ()
   returnA -< r + r'
 
+-- |
+-- prop> testState (n, s) == (s, n + s)
 testState :: (Int, Int) -> (Int, Int)
 testState = runState proc n -> do
   s <- get -< ()
   put -< n + s
   returnA -< s
 
+-- |
+-- prop> testNondet n == [n, n + 1]
 testNondet :: Int -> [Int]
 testNondet = runKleisli $ runNonDet proc n ->
   do returnA -< n

@@ -27,13 +27,13 @@ library
         Control.Arrow.Effect.Reader
         Control.Arrow.Effect.Nondet
     build-depends:
-        base >=4.16
+        base >=4.16 && <5,
 
 executable arrow-effect-handlers-exe
     import: defaults
     hs-source-dirs: app
     main-is: Main.hs
     build-depends:
-        base >=4.16,
-        arrows,
-        arrow-effect-handlers
+        base >=4.16 && <5,
+        arrow-effect-handlers,
+        QuickCheck

@@ -1,2 +1,8 @@
 packages: ./*/*.cabal
 allow-newer: all
+
+program-options
+  ghc-options:
+    -pgmL markdown-unlit
+
+write-ghc-environment-files: ghc8.4.4+
