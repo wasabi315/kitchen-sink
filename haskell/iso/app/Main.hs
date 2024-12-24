@@ -1,9 +1,14 @@
 module Main (module Main) where
 
+import Control.Monad
 import Data.Char
 import Data.Function
+import Data.List (permutations)
+import Data.Maybe
 import Data.MultiSet (MultiSet)
 import Data.MultiSet qualified as MS
+import Data.Set (Set)
+import Data.Set qualified as S
 import Data.String
 import Data.Void
 import System.IO
@@ -41,6 +46,29 @@ data Factor = NF :=> Atom
 type NF = MultiSet Factor
 
 --------------------------------------------------------------------------------
+
+tyvars :: Ty -> Set Name
+tyvars = \case
+  Var x -> S.singleton x
+  Unit -> S.empty
+  a :* b -> tyvars a <> tyvars b
+  a :-> b -> tyvars a <> tyvars b
+  List a -> tyvars a
+
+possibleRenamings :: Ty -> Ty -> [[(Name, Name)]]
+possibleRenamings a b = do
+  let avars = S.toList $ tyvars a
+      bvars = S.toList $ tyvars b
+  guard $ length avars == length bvars
+  flip zip avars <$> permutations bvars
+
+rename :: [(Name, Name)] -> Ty -> Ty
+rename r = \case
+  Var x -> Var $ fromJust $ lookup x r
+  Unit -> Unit
+  a :* b -> rename r a :* rename r b
+  a :-> b -> rename r a :-> rename r b
+  List a -> List $ rename r a
 
 {-
 
@@ -94,7 +122,10 @@ reduce (a :-> b) = reduce a --> reduce b
 reduce (List a) = list (reduce a)
 
 equiv :: Ty -> Ty -> Bool
-equiv = (==) `on` reduce
+equiv a b =
+  let a' = reduce a
+      rs = possibleRenamings a b
+   in any (\r -> a' == reduce (rename r b)) rs
 
 --------------------------------------------------------------------------------
 

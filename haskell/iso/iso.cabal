@@ -29,4 +29,5 @@ executable iso
     build-depends:
         base >=4.16,
         multiset,
-        megaparsec
+        megaparsec,
+        containers
