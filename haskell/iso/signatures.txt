@@ -1,0 +1,8 @@
+map : (a -> b) -> [a] -> [b]
+foldr : (a -> b -> b) -> b -> [a] -> b
+foldr1 : (a -> a -> a) -> [a] -> a
+foldl : (b -> a -> b) -> b -> [a] -> b
+foldl1 : (a -> a -> a) -> [a] -> a
+concat : [[a]] -> [a]
+concatMap : (a -> [b]) -> [a] -> [b]
+singleton : a -> [a]
