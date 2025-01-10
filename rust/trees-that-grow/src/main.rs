@@ -6,28 +6,14 @@ trait ExprExt {
     type Abs;
 }
 
+#[derive(Debug, Clone)]
 enum Expr<X: ExprExt> {
     Var(X::Var, String),
     App(X::App, Box<Expr<X>>, Box<Expr<X>>),
     Abs(X::Abs, String, Box<Expr<X>>),
 }
 
-trait ExprExtDebug: ExprExt<Var: Debug, App: Debug, Abs: Debug> {}
-
-impl<X> ExprExtDebug for X where X: ExprExt<Var: Debug, App: Debug, Abs: Debug> {}
-
-impl<X: ExprExtDebug> Debug for Expr<X> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        use Expr::*;
-
-        match self {
-            Var(x, s) => f.debug_tuple("Var").field(x).field(s).finish(),
-            App(x, e1, e2) => f.debug_tuple("App").field(x).field(e1).field(e2).finish(),
-            Abs(x, s, e) => f.debug_tuple("Abs").field(x).field(s).field(e).finish(),
-        }
-    }
-}
-
+#[derive(Debug)]
 enum Plain {}
 
 impl ExprExt for Plain {
@@ -36,6 +22,7 @@ impl ExprExt for Plain {
     type Abs = ();
 }
 
+#[derive(Debug)]
 enum Qualified {}
 
 impl ExprExt for Qualified {
