@@ -186,6 +186,13 @@ add = ƛ ƛ ƛ ƛ var′ (T T T K ∙) · var′ (T K T T ∙) · (var′ (T T K
 _ : 𝕂 ≡ (lam true (lam false var) ↑ ∙)
 _ = refl
 
+_ : 𝕊 ≡ (lam true
+   (lam true
+    (lam true
+     (app (B R L ∙) (app (R L ∙) var var) (app (R L ∙) var var))))
+   ↑ ∙)
+_ = refl
+
 _ : nf ∙ (𝕊 · 𝕂 · 𝕊 · 𝕂) ≡ 𝕂
 _ = refl
 
