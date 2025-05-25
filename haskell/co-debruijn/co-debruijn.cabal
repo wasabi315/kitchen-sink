@@ -1,0 +1,26 @@
+cabal-version:      3.0
+name:               co-debruijn
+version:            0.1.0.0
+synopsis:
+license:            BSD-3-Clause
+license-file:       LICENSE
+author:             wasabi315
+maintainer:         wasabi.nvim.st@gmail.com
+-- copyright:
+
+common defaults
+    default-language: GHC2021
+    ghc-options:
+        -Wall
+        -Wcompat
+        -Wincomplete-record-updates
+        -Wincomplete-uni-patterns
+        -Wredundant-constraints
+        -O2
+
+executable co-debruijn
+    import: defaults
+    hs-source-dirs: app
+    main-is: Main.hs
+    build-depends:
+        base >=4.16
