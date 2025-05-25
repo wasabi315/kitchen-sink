@@ -147,12 +147,12 @@ vapp = \cases
 quote :: Value -> Term
 quote = \case
   VLam c :^ t -> lam $ quote $ (c :^ (t :> False)) `capp` (VRigid SNil :^ (zeroThin :> True))
-  VRigid sp :^ t -> thinMore t $ quoteSpine sp
+  VRigid sp :^ t -> quoteSpine (sp :^ t)
 
-quoteSpine :: Spine -> Term
+quoteSpine :: Thinned Spine -> Term
 quoteSpine = \case
-  SNil -> Var :^ (zeroThin :> True)
-  SApp t sp u l -> thinMore t (quoteSpine sp) `app` thinMore u (quote (l :^ idThin))
+  SNil :^ _ -> Var :^ (zeroThin :> True)
+  SApp t sp u l :^ v -> quoteSpine (sp :^ (t <> v)) `app` quote (l :^ (u <> v))
 
 nf :: Env -> Term -> Term
 nf env t = quote (eval env t)
