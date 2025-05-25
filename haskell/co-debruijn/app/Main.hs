@@ -161,7 +161,7 @@ quote = \case
 quoteSpine :: Thinned Spine -> Term
 quoteSpine = \case
   SNil :^ v -> Var :^ (singletonThin 0 <> v)
-  SApp t sp u l :^ v -> quoteSpine (sp :^ (t <> v)) `app` quote (l :^ (u <> v))
+  SApp t sp u l :^ v -> thinMore v $ quoteSpine (sp :^ t) `app` quote (l :^ u)
 
 nf :: Env -> Term -> Term
 nf env t = quote (eval env t)
