@@ -13,7 +13,14 @@ import Data.Bits.Pdep
 import Data.Bits.Pext
 import Data.Word
 
-main = pure ()
+main :: IO ()
+main = do
+  let _3p5 = nf [] $ plus `app` church 3 `app` church 5
+      _8 = church 8
+  putStrLn $ "3 + 5              : " ++ prettyTerm 0 0 _3p5 ""
+  putStrLn $ "3 + 5 (normalised) : " ++ prettyTerm 0 0 (nf [] _3p5) ""
+  putStrLn $ "8                  : " ++ prettyTerm 0 0 _8 ""
+  putStrLn $ "3 + 5 =?= 8        : " ++ show (nf [] _3p5 == _8)
 
 --------------------------------------------------------------------------------
 
