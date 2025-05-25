@@ -18,9 +18,9 @@ main = do
   let _3p5 = plus `app` church 3 `app` church 5
       _8 = church 8
   putStrLn $ "3 + 5           : " ++ prettyTerm 0 0 _3p5 ""
-  putStrLn $ "nf(3 + 5)       : " ++ prettyTerm 0 0 (nf [] _3p5) ""
+  putStrLn $ "nf(3 + 5)       : " ++ prettyTerm 0 0 (nf ENil _3p5) ""
   putStrLn $ "8               : " ++ prettyTerm 0 0 _8 ""
-  putStrLn $ "nf(3 + 5) =?= 8 : " ++ show (nf [] _3p5 == _8)
+  putStrLn $ "nf(3 + 5) =?= 8 : " ++ show (nf ENil _3p5 == _8)
 
 --------------------------------------------------------------------------------
 
@@ -71,10 +71,6 @@ coprod (Thin t) (Thin u) = (Thin t', Thin u', Thin v)
     !t' = pext t v
     !u' = pext u v
 
--- assumes singleton thinning
-(!) :: [a] -> Thin -> a
-xs ! Thin t = xs !! countTrailingZeros t
-
 data Thinned a = a :^ Thin
   deriving (Eq, Show)
 
@@ -119,22 +115,37 @@ data Closure = Closure Thin Env Bool Term'
 
 type Value = Thinned Value'
 
-type Env = [Value]
+data Env
+  = ENil
+  | ECons Value Thin Env
+  deriving (Eq, Show)
+
+(!) :: Env -> Thin -> Value
+(!) = \xs (Thin t) -> go idThin xs (countTrailingZeros t)
+  where
+    go t = \cases
+      (ECons v _ _) 0 -> thinMore t v
+      (ECons _ u xs) d -> go (u <> t) xs (d - 1)
+      ENil _ -> error "Variable not found"
+
+thinEnv :: Thin -> Env -> Env
+thinEnv t = \case
+  ENil -> ENil
+  ECons v u xs -> ECons (thinMore t v) (u <> t) xs
 
 eval :: Env -> Term -> Value
 eval env = \case
   Var :^ t -> env ! t
   Lam b u :^ t -> VLam (Closure t env b u) :^ idThin
   App t l u m :^ v ->
-    eval env (l :^ (t <> v))
-      `vapp` eval env (m :^ (u <> v))
+    eval env (l :^ (t <> v)) `vapp` eval env (m :^ (u <> v))
 
 capp :: Thinned Closure -> Value -> Value
 capp = \cases
   (Closure t env True l :^ u) m ->
-    eval (m : map (thinMore u) env) (l :^ (t :> True))
+    eval (ECons m u env) (l :^ (t :> True))
   (Closure t env False l :^ u) _ ->
-    eval (map (thinMore u) env) (l :^ t)
+    eval (thinEnv u env) (l :^ t)
 
 vapp :: Value -> Value -> Value
 vapp = \cases

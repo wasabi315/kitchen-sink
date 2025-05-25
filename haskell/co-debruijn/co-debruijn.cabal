@@ -16,6 +16,7 @@ common defaults
         -Wincomplete-record-updates
         -Wincomplete-uni-patterns
         -Wredundant-constraints
+        -funbox-strict-fields
         -O2
 
 executable co-debruijn
