@@ -17,10 +17,10 @@ main :: IO ()
 main = do
   let _3p5 = plus `app` church 3 `app` church 5
       _8 = church 8
-  putStrLn $ "3 + 5              : " ++ prettyTerm 0 0 _3p5 ""
-  putStrLn $ "3 + 5 (normalised) : " ++ prettyTerm 0 0 (nf [] _3p5) ""
-  putStrLn $ "8                  : " ++ prettyTerm 0 0 _8 ""
-  putStrLn $ "3 + 5 =?= 8        : " ++ show (nf [] _3p5 == _8)
+  putStrLn $ "3 + 5           : " ++ prettyTerm 0 0 _3p5 ""
+  putStrLn $ "nf(3 + 5)       : " ++ prettyTerm 0 0 (nf [] _3p5) ""
+  putStrLn $ "8               : " ++ prettyTerm 0 0 _8 ""
+  putStrLn $ "nf(3 + 5) =?= 8 : " ++ show (nf [] _3p5 == _8)
 
 --------------------------------------------------------------------------------
 
@@ -44,7 +44,7 @@ singletonThin :: Int -> Thin
 singletonThin i = Thin (bit i)
 
 compThin :: Thin {-m,n-} -> Thin {-n,o-} -> Thin {-m,o-}
-compThin = \(Thin t) (Thin u) -> Thin (pdep t u)
+compThin (Thin t) (Thin u) = Thin (pdep t u)
 
 snoc :: Thin -> Bool -> Thin
 snoc (Thin t) b = Thin (2 * t + if b then 1 else 0)
