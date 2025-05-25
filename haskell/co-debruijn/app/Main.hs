@@ -9,6 +9,8 @@
 {-# LANGUAGE ViewPatterns #-}
 
 import Data.Bits
+import Data.Bits.Pdep
+import Data.Bits.Pext
 import Data.Word
 
 main = pure ()
@@ -19,7 +21,7 @@ main = pure ()
 -- The i-th least significant bit may mask the i-th nearest variable in scope.
 -- Only 64 variables are supported in this implementation.
 newtype Thin = Thin Word64
-  deriving (Eq)
+  deriving (Eq, Show)
 
 srcSize :: Thin {-m,n-} -> Int {-m-}
 srcSize (Thin t) = popCount t
@@ -35,14 +37,7 @@ singletonThin :: Int -> Thin
 singletonThin i = Thin (bit i)
 
 compThin :: Thin {-m,n-} -> Thin {-n,o-} -> Thin {-m,o-}
-compThin = \(Thin t) (Thin u) -> Thin (go 0 0 t u)
-  where
-    go :: Word64 -> Int -> Word64 -> Word64 -> Word64
-    go !acc !d = \cases
-      0 !_ -> acc
-      t u ->
-        let n = countTrailingZeros u
-         in go (if testBit t 0 then setBit acc (d + n) else acc) (d + n + 1) (t `shiftR` 1) (u `shiftR` (n + 1))
+compThin = \(Thin t) (Thin u) -> Thin (pdep t u)
 
 snoc :: Thin -> Bool -> Thin
 snoc (Thin t) b = Thin (2 * t + if b then 1 else 0)
@@ -61,28 +56,20 @@ instance Semigroup Thin where
 
 instance Monoid Thin where
   mempty = idThin
-  mappend = (<>)
 
 coprod :: Thin {-i,m-} -> Thin {-j,m-} -> (Thin {-i,n-}, Thin {-j,n-}, Thin {-n,m-})
-coprod = \(Thin t) (Thin u) ->
-  let !v = t .|. u
-      !t' = go 0 0 v t
-      !u' = go 0 0 v u
-   in (Thin t', Thin u', Thin v)
+coprod (Thin t) (Thin u) = (Thin t', Thin u', Thin v)
   where
-    go :: Int -> Word64 -> Word64 -> Word64 -> Word64
-    go !d !acc = \cases
-      0 !_ -> acc
-      v t ->
-        let n = countTrailingZeros v
-         in go (d + 1) (if testBit t n then setBit acc d else acc) (v `shiftR` (n + 1)) (t `shiftR` (n + 1))
+    !v = t .|. u
+    !t' = pext t v
+    !u' = pext u v
 
 -- assumes singleton thinning
 (!) :: [a] -> Thin -> a
 xs ! Thin t = xs !! countTrailingZeros t
 
 data Thinned a = a :^ Thin
-  deriving (Eq)
+  deriving (Eq, Show)
 
 thinMore :: Thin -> Thinned a -> Thinned a
 thinMore t (a :^ u) = a :^ (u <> t)
@@ -93,6 +80,7 @@ data Term'
   = Var
   | Lam Bool Term'
   | App Thin Term' Thin Term' -- Two thinnings form a cover
+  deriving (Eq, Show)
 
 -- Lambda terms with co-de Bruijn indices
 type Term = Thinned Term'
@@ -112,12 +100,15 @@ app (l :^ t) (m :^ u) = case coprod t u of
 data Value'
   = VLam Closure
   | VRigid Spine
+  deriving (Eq, Show)
 
 data Spine
   = SNil {-1-}
   | SApp Thin Spine Thin Value'
+  deriving (Eq, Show)
 
 data Closure = Closure Thin Env Bool Term'
+  deriving (Eq, Show)
 
 type Value = Thinned Value'
 
@@ -146,12 +137,12 @@ vapp = \cases
 
 quote :: Value -> Term
 quote = \case
-  VLam c :^ t -> lam $ quote $ (c :^ (t :> False)) `capp` (VRigid SNil :^ (zeroThin :> True))
+  VLam c :^ t -> lam $ quote $ (c :^ (t :> False)) `capp` (VRigid SNil :^ singletonThin 0)
   VRigid sp :^ t -> quoteSpine (sp :^ t)
 
 quoteSpine :: Thinned Spine -> Term
 quoteSpine = \case
-  SNil :^ _ -> Var :^ (zeroThin :> True)
+  SNil :^ v -> Var :^ (singletonThin 0 <> v)
   SApp t sp u l :^ v -> quoteSpine (sp :^ (t <> v)) `app` quote (l :^ (u <> v))
 
 nf :: Env -> Term -> Term

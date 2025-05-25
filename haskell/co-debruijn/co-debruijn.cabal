@@ -23,4 +23,5 @@ executable co-debruijn
     hs-source-dirs: app
     main-is: Main.hs
     build-depends:
-        base >=4.16
+        base >=4.16,
+        bits-extra
