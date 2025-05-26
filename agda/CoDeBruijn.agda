@@ -10,7 +10,7 @@ private
   variable
     i j m n o : ℕ
 
-infix  4 _⊑_ _⇑_ _↑_ _‼_
+infix  4 _⊑_ _⇑_ _↑_ _!_
 infixr 5 _⨟_ _∷⟨_↑_⟩
 infixr 6 ƛ_
 infixl 8 _·_ _·ᶜ_ _·ᵛ_
@@ -109,7 +109,8 @@ mutual
     rigid : Spine m → Val′ m
 
   data Closure : ℕ → Set where
-    clos : m ⊑ n → Env o n → (use : Bool) → Term′ (sucIf use m) → Closure o
+    clos  : m ⊑ n → Env o n → Term′ (suc m) → Closure o
+    const : Val o → Closure o
 
   data Spine : ℕ → Set where
     ∙   : Spine 1
@@ -121,13 +122,9 @@ mutual
 
   Val = Val′ ⇑_
 
-thinEnv : m ⊑ n → Env m o → Env n o
-thinEnv _ ∙              = ∙
-thinEnv θ (t ∷⟨ ρ ↑ φ ⟩) = thin⇑ θ t ∷⟨ ρ ↑ φ ⨟ θ ⟩
-
-_‼_ : Env m n → 1 ⊑ n → Val m
-_ ∷⟨ ρ ↑ φ ⟩ ‼ T θ = thin⇑ φ (ρ ‼ θ)
-t ∷⟨ _ ↑ _ ⟩ ‼ K θ = t
+_!_ : Env m n → 1 ⊑ n → Val m
+_ ∷⟨ ρ ↑ φ ⟩ ! T θ = thin⇑ φ (ρ ! θ)
+t ∷⟨ _ ↑ _ ⟩ ! K θ = t
 
 --------------------------------------------------------------------------------
 -- Evaluation and read-back
@@ -136,13 +133,14 @@ t ∷⟨ _ ↑ _ ⟩ ‼ K θ = t
 mutual
 
   eval : Env m n → Term n → Val m
-  eval ρ (var       ↑ θ) = ρ ‼ θ
-  eval ρ (lam φ t   ↑ θ) = lam (clos θ ρ φ t) ↑ id⊑
-  eval ρ (app c t u ↑ θ) = eval ρ (t ↑ thinL c ⨟ θ) ·ᵛ eval ρ (u ↑ thinR c ⨟ θ)
+  eval ρ (var         ↑ θ) = ρ ! θ
+  eval ρ (lam false t ↑ θ) = lam (const (eval ρ (t ↑ θ))) ↑ id⊑
+  eval ρ (lam true t  ↑ θ) = lam (clos θ ρ t) ↑ id⊑
+  eval ρ (app c t u   ↑ θ) = eval ρ (t ↑ thinL c ⨟ θ) ·ᵛ eval ρ (u ↑ thinR c ⨟ θ)
 
   _·ᶜ_ : Closure ⇑ m → Val m → Val m
-  (clos θ ρ false t ↑ φ) ·ᶜ m = eval (thinEnv φ ρ) (t ↑ θ)
-  (clos θ ρ true  t ↑ φ) ·ᶜ m = eval (m ∷⟨ ρ ↑ φ ⟩) (t ↑ K θ)
+  (clos θ ρ t ↑ φ) ·ᶜ m = eval (m ∷⟨ ρ ↑ φ ⟩) (t ↑ K θ)
+  (const t    ↑ φ) ·ᶜ m = thin⇑ φ t
 
   _·ᵛ_ : Val m → Val m → Val m
   (rigid sp ↑ θ) ·ᵛ (u ↑ φ) = let _ , c , ψ = coprod θ φ in rigid (app c sp u) ↑ ψ
