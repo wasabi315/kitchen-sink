@@ -17,10 +17,10 @@ main :: IO ()
 main = do
   let _3p5 = plus `app` church 3 `app` church 5
       _8 = church 8
-  putStrLn $ "3 + 5           : " ++ prettyTerm 0 0 _3p5 ""
-  putStrLn $ "nf(3 + 5)       : " ++ prettyTerm 0 0 (nf ENil _3p5) ""
-  putStrLn $ "8               : " ++ prettyTerm 0 0 _8 ""
-  putStrLn $ "nf(3 + 5) =?= 8 : " ++ show (nf ENil _3p5 == _8)
+  putStrLn $ "3 + 5       : " ++ prettyTerm 0 0 _3p5 ""
+  putStrLn $ "nf(3 + 5)   : " ++ prettyTerm 0 0 (nf ENil _3p5) ""
+  putStrLn $ "8           : " ++ prettyTerm 0 0 _8 ""
+  putStrLn $ "3 + 5 =?= 8 : " ++ show (conv 0 (eval ENil _3p5) (eval ENil _8))
 
 --------------------------------------------------------------------------------
 
@@ -28,10 +28,7 @@ main = do
 -- The i-th least significant bit may mask the i-th nearest variable in scope.
 -- Only 64 variables are supported in this implementation.
 newtype Thin = Thin Word64
-  deriving (Eq, Show)
-
-srcSize :: Thin {-m,n-} -> Int {-m-}
-srcSize (Thin t) = popCount t
+  deriving (Show)
 
 zeroThin :: Thin {-0,m-}
 zeroThin = Thin 0
@@ -71,8 +68,21 @@ coprod (Thin t) (Thin u) = (Thin t', Thin u', Thin v)
     !t' = pext t v
     !u' = pext u v
 
+mask :: Int -> Word64
+mask k
+  | k >= 64 = complement 0
+  | otherwise = (1 `shiftL` k) - 1
+
+srcSize :: Int {-n-} -> Thin {-m,n-} -> Int {-m-}
+srcSize k (Thin t) = popCount (t .&. mask k)
+
+sameThin :: Int -> Thin -> Thin -> Bool
+sameThin k (Thin t) (Thin u) = (t .&. m) == (u .&. m)
+  where
+    m = mask k
+
 data Thinned a = a :^ Thin
-  deriving (Eq, Show)
+  deriving (Show)
 
 thinMore :: Thin -> Thinned a -> Thinned a
 thinMore t (a :^ u) = a :^ (u <> t)
@@ -83,7 +93,7 @@ data Term'
   = Var
   | Lam Bool Term'
   | App Thin Term' Thin Term' -- Two thinnings form a cover
-  deriving (Eq, Show)
+  deriving (Show)
 
 -- Lambda terms with co-de Bruijn indices
 type Term = Thinned Term'
@@ -103,24 +113,24 @@ app (l :^ t) (m :^ u) = case coprod t u of
 data Value'
   = VLam Closure
   | VRigid Spine
-  deriving (Eq, Show)
+  deriving (Show)
 
 data Spine
   = SNil {-1-}
   | SApp Thin Spine Thin Value'
-  deriving (Eq, Show)
+  deriving (Show)
 
 data Closure
-  = Closure Thin Env Term'
+  = Closure Env Term' Thin
   | Const Value
-  deriving (Eq, Show)
+  deriving (Show)
 
 type Value = Thinned Value'
 
 data Env
   = ENil
   | ECons Value Thin Env
-  deriving (Eq, Show)
+  deriving (Show)
 
 (!) :: Env -> Thin -> Value
 (!) = \xs (Thin t) -> go idThin xs (countTrailingZeros t)
@@ -133,13 +143,13 @@ data Env
 eval :: Env -> Term -> Value
 eval env = \case
   Var :^ t -> env ! t
-  Lam True u :^ t -> VLam (Closure t env u) :^ idThin
+  Lam True u :^ t -> VLam (Closure env u t) :^ idThin
   Lam False u :^ t -> VLam (Const (eval env (u :^ t))) :^ idThin
   App t l u m :^ v -> eval env (l :^ (t <> v)) `vapp` eval env (m :^ (u <> v))
 
 capp :: Thinned Closure -> Value -> Value
 capp = \cases
-  (Closure t env l :^ u) m -> eval (ECons m u env) (l :^ (t :> True))
+  (Closure env l t :^ u) m -> eval (ECons m u env) (l :^ (t :> True))
   (Const l :^ t) _ -> thinMore t l
 
 vapp :: Value -> Value -> Value
@@ -160,6 +170,37 @@ quoteSpine = \case
 
 nf :: Env -> Term -> Term
 nf env t = quote (eval env t)
+
+--------------------------------------------------------------------------------
+
+-- beta-eta conversion
+conv :: Int -> Value -> Value -> Bool
+conv k = \cases
+  (_ :^ t) (_ :^ t') | not (sameThin k t t') -> False
+  (VRigid sp :^ t) (VRigid sp' :^ _) -> convSpine (srcSize k t) sp sp'
+  (VLam c :^ t) (VLam c' :^ t') ->
+    let x = VRigid SNil :^ singletonThin 0
+        l = capp (c :^ (t :> False)) x
+        l' = capp (c' :^ (t' :> False)) x
+     in conv (k + 1) l l'
+  (VLam c :^ t) (l :^ t') ->
+    let x = VRigid SNil :^ singletonThin 0
+        m = capp (c :^ (t :> False)) x
+        l' = vapp (l :^ (t' :> False)) x
+     in conv (k + 1) m l'
+  (l :^ t) (VLam c :^ t') ->
+    let x = VRigid SNil :^ singletonThin 0
+        l' = vapp (l :^ (t :> False)) x
+        m = capp (c :^ (t' :> False)) x
+     in conv (k + 1) m l'
+
+convSpine :: Int -> Spine -> Spine -> Bool
+convSpine k = \cases
+  SNil SNil -> True
+  (SApp t sp u l) (SApp t' sp' u' l')
+    | not (sameThin k t t') -> False
+    | otherwise -> convSpine (srcSize k t) sp sp' && conv k (l :^ u) (l' :^ u')
+  _ _ -> False
 
 --------------------------------------------------------------------------------
 
@@ -186,23 +227,26 @@ prettyTerm' p k = \case
   App t l u m ->
     showParen (p > 10) $
       showString "app "
-        . ( if t == zeroThin && u == zeroThin
+        . ( if sameThin k t zeroThin && sameThin k u zeroThin
               then id
               else prettyCover k t u . showChar ' '
           )
-        . prettyTerm' 11 (srcSize t) l
+        . prettyTerm' 11 (srcSize k t) l
         . showChar ' '
-        . prettyTerm' 11 (srcSize u) m
+        . prettyTerm' 11 (srcSize k u) m
 
 prettyTerm :: Int -> Int -> Term -> ShowS
 prettyTerm p k (l :^ t) =
   showParen (p > 10) $
-    prettyTerm' (if k == 0 then p else 11) (srcSize t) l
+    prettyTerm' (if k == 0 then p else 11) (srcSize k t) l
       . if k == 0
         then id
         else showString " ↑ " . prettyThin k t
 
 --------------------------------------------------------------------------------
+
+_O :: Term
+_O = lam (var 0 `app` var 0) `app` lam (var 0 `app` var 0)
 
 _I :: Term
 _I = lam $ var 0
