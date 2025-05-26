@@ -110,7 +110,9 @@ data Spine
   | SApp Thin Spine Thin Value'
   deriving (Eq, Show)
 
-data Closure = Closure Thin Env Bool Term'
+data Closure
+  = Closure Thin Env Term'
+  | Const Value
   deriving (Eq, Show)
 
 type Value = Thinned Value'
@@ -128,24 +130,17 @@ data Env
       (ECons _ u xs) d -> go (u <> t) xs (d - 1)
       ENil _ -> error "Variable not found"
 
-thinEnv :: Thin -> Env -> Env
-thinEnv t = \case
-  ENil -> ENil
-  ECons v u xs -> ECons (thinMore t v) (u <> t) xs
-
 eval :: Env -> Term -> Value
 eval env = \case
   Var :^ t -> env ! t
-  Lam b u :^ t -> VLam (Closure t env b u) :^ idThin
-  App t l u m :^ v ->
-    eval env (l :^ (t <> v)) `vapp` eval env (m :^ (u <> v))
+  Lam True u :^ t -> VLam (Closure t env u) :^ idThin
+  Lam False u :^ t -> VLam (Const (eval env (u :^ t))) :^ idThin
+  App t l u m :^ v -> eval env (l :^ (t <> v)) `vapp` eval env (m :^ (u <> v))
 
 capp :: Thinned Closure -> Value -> Value
 capp = \cases
-  (Closure t env True l :^ u) m ->
-    eval (ECons m u env) (l :^ (t :> True))
-  (Closure t env False l :^ u) _ ->
-    eval (thinEnv u env) (l :^ t)
+  (Closure t env l :^ u) m -> eval (ECons m u env) (l :^ (t :> True))
+  (Const l :^ t) _ -> thinMore t l
 
 vapp :: Value -> Value -> Value
 vapp = \cases
@@ -161,7 +156,7 @@ quote = \case
 quoteSpine :: Thinned Spine -> Term
 quoteSpine = \case
   SNil :^ v -> Var :^ (singletonThin 0 <> v)
-  SApp t sp u l :^ v -> thinMore v $ quoteSpine (sp :^ t) `app` quote (l :^ u)
+  SApp t sp u l :^ v -> quoteSpine (sp :^ (t <> v)) `app` quote (l :^ (u <> v))
 
 nf :: Env -> Term -> Term
 nf env t = quote (eval env t)
