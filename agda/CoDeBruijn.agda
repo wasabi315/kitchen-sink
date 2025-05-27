@@ -102,25 +102,29 @@ _·_ : Term n → Term n → Term n
 --------------------------------------------------------------------------------
 -- Values
 
-mutual
+data Val′    : ℕ → Set
+data Closure : ℕ → Set
+data Env     : ℕ → ℕ → Set
+data Spine   : ℕ → Set
+Val          : ℕ → Set
 
-  data Val′ : ℕ → Set where
-    lam   : Closure m → Val′ m
-    rigid : Spine m → Val′ m
+data Val′ where
+  lam   : Closure m → Val′ m
+  rigid : Spine m → Val′ m
 
-  data Closure : ℕ → Set where
-    clos  : m ⊑ n → Env o n → Term′ (suc m) → Closure o
-    const : Val o → Closure o
+data Closure where
+  clos  : Env m n → Term′ (suc o) → o ⊑ n → Closure m
+  const : Val m → Closure m
 
-  data Spine : ℕ → Set where
-    ∙   : Spine 1
-    app : Cover m n o → Spine m → Val′ n → Spine o
+data Spine where
+  ∙   : Spine 1
+  app : Cover m n o → Spine m → Val′ n → Spine o
 
-  data Env : ℕ → ℕ → Set where
-    ∙       : Env m 0
-    _∷⟨_↑_⟩ : Val m → Env n o → n ⊑ m → Env m (suc o)
+data Env where
+  ∙       : Env m 0
+  _∷⟨_↑_⟩ : Val m → Env n o → n ⊑ m → Env m (suc o)
 
-  Val = Val′ ⇑_
+Val = Val′ ⇑_
 
 _!_ : Env m n → 1 ⊑ n → Val m
 _ ∷⟨ ρ ↑ φ ⟩ ! T θ = thin⇑ φ (ρ ! θ)
@@ -129,33 +133,29 @@ t ∷⟨ _ ↑ _ ⟩ ! K θ = t
 --------------------------------------------------------------------------------
 -- Evaluation and read-back
 
-{-# TERMINATING #-}
-mutual
+{-# TERMINATING #-} -- I'm just lazy
+eval          : Env m n → Term n → Val m
+_·ᶜ_          : Closure ⇑ m → Val m → Val m
+_·ᵛ_          : Val m → Val m → Val m
+readBack      : Val m → Term m
+readBackSpine : Spine ⇑ m → Term m
 
-  eval : Env m n → Term n → Val m
-  eval ρ (var         ↑ θ) = ρ ! θ
-  eval ρ (lam false t ↑ θ) = lam (const (eval ρ (t ↑ θ))) ↑ id⊑
-  eval ρ (lam true t  ↑ θ) = lam (clos θ ρ t) ↑ id⊑
-  eval ρ (app c t u   ↑ θ) = eval ρ (t ↑ thinL c ⨟ θ) ·ᵛ eval ρ (u ↑ thinR c ⨟ θ)
+eval ρ (var         ↑ θ) = ρ ! θ
+eval ρ (lam false t ↑ θ) = lam (const (eval ρ (t ↑ θ))) ↑ id⊑
+eval ρ (lam true t  ↑ θ) = lam (clos ρ t θ)             ↑ id⊑
+eval ρ (app c t u   ↑ θ) = eval ρ (t ↑ thinL c ⨟ θ) ·ᵛ eval ρ (u ↑ thinR c ⨟ θ)
 
-  _·ᶜ_ : Closure ⇑ m → Val m → Val m
-  (clos θ ρ t ↑ φ) ·ᶜ m = eval (m ∷⟨ ρ ↑ φ ⟩) (t ↑ K θ)
-  (const t    ↑ φ) ·ᶜ m = thin⇑ φ t
+(clos ρ t θ ↑ φ) ·ᶜ m = eval (m ∷⟨ ρ ↑ φ ⟩) (t ↑ K θ)
+(const t    ↑ φ) ·ᶜ m = thin⇑ φ t
 
-  _·ᵛ_ : Val m → Val m → Val m
-  (rigid sp ↑ θ) ·ᵛ (u ↑ φ) = let _ , c , ψ = coprod θ φ in rigid (app c sp u) ↑ ψ
-  (lam cl   ↑ θ) ·ᵛ u       = (cl ↑ θ) ·ᶜ u
+(rigid sp ↑ θ) ·ᵛ (u ↑ φ) = let _ , c , ψ = coprod θ φ in rigid (app c sp u) ↑ ψ
+(lam cl   ↑ θ) ·ᵛ u       = (cl ↑ θ) ·ᶜ u
 
-{-# TERMINATING #-}
-mutual
+readBack (lam cl   ↑ θ) = ƛ readBack ((cl ↑ T θ) ·ᶜ (rigid ∙ ↑ K ∙⊑))
+readBack (rigid sp ↑ θ) = readBackSpine (sp ↑ θ)
 
-  readBack : Val m → Term m
-  readBack (lam cl   ↑ θ) = ƛ readBack ((cl ↑ T θ) ·ᶜ (rigid ∙ ↑ K ∙⊑))
-  readBack (rigid sp ↑ θ) = readBackSpine (sp ↑ θ)
-
-  readBackSpine : Spine ⇑ m → Term m
-  readBackSpine (∙          ↑ θ) = var ↑ (K ∙⊑ ⨟ θ)
-  readBackSpine (app c sp t ↑ θ) = thin⇑ θ (readBackSpine (sp ↑ thinL c) · readBack (t ↑ thinR c))
+readBackSpine (∙          ↑ θ) = var ↑ (K ∙⊑ ⨟ θ)
+readBackSpine (app c sp t ↑ θ) = thin⇑ θ (readBackSpine (sp ↑ thinL c) · readBack (t ↑ thinR c))
 
 nf : Env m n → Term n → Term m
 nf ρ t = readBack (eval ρ t)
@@ -171,12 +171,12 @@ nf ρ t = readBack (eval ρ t)
 𝕊 : Term 0
 𝕊 = ƛ ƛ ƛ var′ (T T K ∙) · var′ (K T T ∙) · (var′ (T K T ∙) · var′ (K T T ∙))
 
-Ch′ : ℕ → Term 2
-Ch′ zero    = var′ (K T ∙)
-Ch′ (suc n) = var′ (T K ∙) · Ch′ n
+church′ : ℕ → Term 2
+church′ zero    = var′ (K T ∙)
+church′ (suc n) = var′ (T K ∙) · church′ n
 
-Ch : ℕ → Term 0
-Ch n = ƛ ƛ Ch′ n
+church : ℕ → Term 0
+church n = ƛ ƛ church′ n
 
 add : Term 0
 add = ƛ ƛ ƛ ƛ var′ (T T T K ∙) · var′ (T K T T ∙) · (var′ (T T K T ∙) · var′ (T K T T ∙) · var′ (K T T T ∙))
@@ -194,5 +194,5 @@ _ = refl
 _ : nf ∙ (𝕊 · 𝕂 · 𝕊 · 𝕂) ≡ 𝕂
 _ = refl
 
-_ : nf ∙ (add · Ch 2 · Ch 40) ≡ Ch 42
+_ : nf ∙ (add · church 2 · church 40) ≡ church 42
 _ = refl
