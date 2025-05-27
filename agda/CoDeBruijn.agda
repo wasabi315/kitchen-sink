@@ -10,7 +10,7 @@ private
   variable
     i j m n o : ℕ
 
-infix  4 _⊑_ _⇑_ _↑_ _!_
+infix  4 _⊑_ _⇑_ _↑_ _!_ _!!_
 infixr 5 _⨟_ _∷⟨_↑_⟩
 infixr 6 ƛ_
 infixl 8 _·_ _·ᶜ_ _·ᵛ_
@@ -113,7 +113,7 @@ data Val′ where
   rigid : Spine m → Val′ m
 
 data Closure where
-  clos  : Env m n → Term′ (suc o) → o ⊑ n → Closure m
+  clos  : Env m n → Term′ (suc n) → Closure m
   const : Val m → Closure m
 
 data Spine where
@@ -130,6 +130,14 @@ _!_ : Env m n → 1 ⊑ n → Val m
 _ ∷⟨ ρ ↑ φ ⟩ ! T θ = thin⇑ φ (ρ ! θ)
 t ∷⟨ _ ↑ _ ⟩ ! K θ = t
 
+!!-help : i ⊑ j → Env i m → n ⊑ m → Env j n
+!!-help θ ∙              ∙     = ∙
+!!-help θ (_ ∷⟨ ρ ↑ φ ⟩) (T ψ) = !!-help (φ ⨟ θ) ρ ψ
+!!-help θ (t ∷⟨ ρ ↑ φ ⟩) (K ψ) = thin⇑ θ t ∷⟨ !!-help id⊑ ρ ψ ↑ φ ⨟ θ ⟩
+
+_!!_ : Env m n → o ⊑ n → Env m o
+ρ !! θ = !!-help id⊑ ρ θ
+
 --------------------------------------------------------------------------------
 -- Evaluation and read-back
 
@@ -142,11 +150,11 @@ readBackSpine : Spine ⇑ m → Term m
 
 eval ρ (var         ↑ θ) = ρ ! θ
 eval ρ (lam false t ↑ θ) = lam (const (eval ρ (t ↑ θ))) ↑ id⊑
-eval ρ (lam true t  ↑ θ) = lam (clos ρ t θ)             ↑ id⊑
+eval ρ (lam true t  ↑ θ) = lam (clos (ρ !! θ) t)        ↑ id⊑
 eval ρ (app c t u   ↑ θ) = eval ρ (t ↑ thinL c ⨟ θ) ·ᵛ eval ρ (u ↑ thinR c ⨟ θ)
 
-(clos ρ t θ ↑ φ) ·ᶜ m = eval (m ∷⟨ ρ ↑ φ ⟩) (t ↑ K θ)
-(const t    ↑ φ) ·ᶜ m = thin⇑ φ t
+(clos ρ t ↑ φ) ·ᶜ m = eval (m ∷⟨ ρ ↑ φ ⟩) (t ↑ id⊑)
+(const t  ↑ φ) ·ᶜ m = thin⇑ φ t
 
 (rigid sp ↑ θ) ·ᵛ (u ↑ φ) = let _ , c , ψ = coprod θ φ in rigid (app c sp u) ↑ ψ
 (lam cl   ↑ θ) ·ᵛ u       = (cl ↑ θ) ·ᶜ u
