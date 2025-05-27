@@ -5,7 +5,7 @@
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE MultiWayIf #-}
 {-# LANGUAGE PatternSynonyms #-}
-{-# LANGUAGE StrictData #-}
+{-# LANGUAGE Strict #-}
 {-# LANGUAGE ViewPatterns #-}
 
 import Data.Bits
@@ -121,8 +121,8 @@ data Spine
   deriving (Show)
 
 data Closure
-  = Closure Env Term' Thin
-  | Const Value
+  = Closure Env Term'
+  | Const ~Value
   deriving (Show)
 
 type Value = Thinned Value'
@@ -136,20 +136,33 @@ data Env
 (!) = \xs (Thin t) -> go idThin xs (countTrailingZeros t)
   where
     go t = \cases
-      (ECons v _ _) 0 -> thinMore t v
-      (ECons _ u xs) d -> go (u <> t) xs (d - 1)
+      (ECons l _ _) 0 -> thinMore t l
+      (ECons _ u ls) d -> go (u <> t) ls (d - 1)
       ENil _ -> error "Variable not found"
+
+select :: Env -> Thin -> Env
+select = go idThin
+  where
+    go :: Thin -> Env -> Thin -> Env
+    go t = \cases
+      ENil _ -> ENil
+      (ECons l u ls) (v :> True) -> ECons l (u <> t) (go idThin ls v)
+      (ECons _ u ls) (v :> False) -> go (u <> t) ls v
 
 eval :: Env -> Term -> Value
 eval env = \case
   Var :^ t -> env ! t
-  Lam True u :^ t -> VLam (Closure env u t) :^ idThin
-  Lam False u :^ t -> VLam (Const (eval env (u :^ t))) :^ idThin
+  Lam True u :^ t ->
+    let env' = select env t
+     in VLam (Closure env' u) :^ idThin
+  Lam False u :^ t ->
+    let env' = select env t
+     in VLam (Const (eval env' (u :^ idThin))) :^ idThin
   App t l u m :^ v -> eval env (l :^ (t <> v)) `vapp` eval env (m :^ (u <> v))
 
 capp :: Thinned Closure -> Value -> Value
 capp = \cases
-  (Closure env l t :^ u) m -> eval (ECons m u env) (l :^ (t :> True))
+  (Closure env l :^ u) m -> eval (ECons m u env) (l :^ idThin)
   (Const l :^ t) _ -> thinMore t l
 
 vapp :: Value -> Value -> Value
@@ -179,20 +192,20 @@ conv k = \cases
   (_ :^ t) (_ :^ t') | not (sameThin k t t') -> False
   (VRigid sp :^ t) (VRigid sp' :^ _) -> convSpine (srcSize k t) sp sp'
   (VLam c :^ t) (VLam c' :^ t') ->
-    let x = VRigid SNil :^ singletonThin 0
-        l = capp (c :^ (t :> False)) x
-        l' = capp (c' :^ (t' :> False)) x
-     in conv (k + 1) l l'
+    conv
+      (k + 1)
+      (capp (c :^ (t :> False)) (VRigid SNil :^ singletonThin 0))
+      (capp (c' :^ (t' :> False)) (VRigid SNil :^ singletonThin 0))
   (VLam c :^ t) (l :^ t') ->
-    let x = VRigid SNil :^ singletonThin 0
-        m = capp (c :^ (t :> False)) x
-        l' = vapp (l :^ (t' :> False)) x
-     in conv (k + 1) m l'
+    conv
+      (k + 1)
+      (capp (c :^ (t :> False)) (VRigid SNil :^ singletonThin 0))
+      (vapp (l :^ (t' :> False)) (VRigid SNil :^ singletonThin 0))
   (l :^ t) (VLam c :^ t') ->
-    let x = VRigid SNil :^ singletonThin 0
-        l' = vapp (l :^ (t :> False)) x
-        m = capp (c :^ (t' :> False)) x
-     in conv (k + 1) m l'
+    conv
+      (k + 1)
+      (vapp (l :^ (t :> False)) (VRigid SNil :^ singletonThin 0))
+      (capp (c :^ (t' :> False)) (VRigid SNil :^ singletonThin 0))
 
 convSpine :: Int -> Spine -> Spine -> Bool
 convSpine k = \cases
