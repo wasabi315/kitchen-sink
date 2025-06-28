@@ -1,9 +1,16 @@
 {-# LANGUAGE DerivingStrategies #-}
+{-# LANGUAGE PatternSynonyms #-}
 {-# LANGUAGE ViewPatterns #-}
 
 module Main where
 
-main = pure ()
+main :: IO ()
+main = do
+  let t = Pi "F" (Pi "_" (Sigma "_" Type Type) Type) $ Pi "A" Type $ Pi "B" Type $ Var 2 :@ Pair (Var 1) (Var 0)
+  putStrLn $ prettyTerm [] 0 t ""
+  let (t', i) = nquote 0 $ normalise 0 $ eval [] t
+  putStrLn $ prettyTerm [] 0 t' ""
+  putStrLn $ prettyIsoCong i ""
 
 --------------------------------------------------------------------------------
 
@@ -26,6 +33,8 @@ data Term
   | Pair Term Term
   | Fst Term
   | Snd Term
+  | Eq Term Term Term
+  | Sym Term
   deriving (Show)
 
 --------------------------------------------------------------------------------
@@ -45,12 +54,14 @@ data Value
   | VAbs Name (Value -> Value)
   | VSigma Name Value (Value -> Value)
   | VPair Value Value
+  | VEq Value Value Value
 
 data Spine
   = SNil
   | SApp Spine Value
   | SFst Spine
   | SSnd Spine
+  | SSym Spine
 
 type Env = [Value]
 
@@ -67,6 +78,8 @@ eval env = \case
   Pair a b -> eval env a `VPair` eval env b
   Fst t -> vfst (eval env t)
   Snd t -> vsnd (eval env t)
+  Eq a t u -> VEq (eval env a) (eval env t) (eval env u)
+  Sym p -> vsym (eval env p)
 
 vapp :: Value -> Value -> Value
 vapp = \cases
@@ -86,6 +99,12 @@ vsnd = \case
   VPair _ b -> b
   _ -> error "vsnd: not a pair"
 
+vsym :: Value -> Value
+vsym = \case
+  VRigid l (SSym sp) -> VRigid l sp
+  VRigid l sp -> VRigid l (SSym sp)
+  _ -> error "vsym: not an equality"
+
 quote :: Level -> Value -> Term
 quote l = \case
   VRigid x sp -> quoteSpine l (Var $ levelToIndex l x) sp
@@ -96,6 +115,7 @@ quote l = \case
   VAbs x t -> Lam x $ quote (l + 1) $ t $ VRigid l SNil
   VSigma x a b -> Sigma x (quote l a) (quote (l + 1) $ b $ VRigid l SNil)
   VPair t u -> Pair (quote l t) (quote l u)
+  VEq a t u -> Eq (quote l a) (quote l t) (quote l u)
 
 quoteSpine :: Level -> Term -> Spine -> Term
 quoteSpine lvl hd = \case
@@ -103,6 +123,7 @@ quoteSpine lvl hd = \case
   SApp sp t -> quoteSpine lvl hd sp :@ quote lvl t
   SFst sp -> Fst $ quoteSpine lvl hd sp
   SSnd sp -> Snd $ quoteSpine lvl hd sp
+  SSym sp -> Sym $ quoteSpine lvl hd sp
 
 --------------------------------------------------------------------------------
 -- Isomorphisms
@@ -136,6 +157,8 @@ data Iso'
     SigmaUnitR
   | -- | (x : Unit) -> A[x] ~ A[tt]
     PiUnitL
+  | -- | Eq A t u ~ Eq A u t
+    EqComm
   deriving (Show)
 
 type IsoCong = EquivClosure IsoCong'
@@ -164,6 +187,7 @@ instance ToFrom Iso' where
     SigmaUnitL -> vsnd t
     SigmaUnitR -> vfst t
     PiUnitL -> t `vapp` VTT
+    EqComm -> vsym t
 
   from i t = case i of
     SigmaAssoc -> (vfst t `VPair` vfst (vsnd t)) `VPair` vsnd (vsnd t)
@@ -172,6 +196,7 @@ instance ToFrom Iso' where
     SigmaUnitL -> VPair VUnit t
     SigmaUnitR -> VPair t VUnit
     PiUnitL -> VAbs "u" \_ -> t
+    EqComm -> vsym t
 
 instance ToFrom IsoCong' where
   to i t = case i of
@@ -237,6 +262,7 @@ data NValue'
   | NAbs Name (Value -> Value)
   | NSigma Name NValue (Value -> NValue)
   | NPair Value Value
+  | NEq Value Value Value
 
 normalise :: Level -> Value -> NValue
 normalise = go Refl
@@ -266,6 +292,7 @@ normalise = go Refl
       VPair t u -> (NPair t u, acc)
       VUnit -> (NUnit, acc)
       VTT -> (NTT, acc)
+      VEq a t u -> (NEq a t u, acc)
 
 nquote :: Level -> NValue -> (Term, IsoCong)
 nquote l = \case
@@ -301,6 +328,12 @@ nquote l = \case
         u' = quote l u
         i' = fmap Iso i
      in (Pair t' u', i')
+  (NEq a t u, i) ->
+    let a' = quote l a
+        t' = quote l t
+        u' = quote l u
+        i' = fmap Iso i
+     in (Eq a' t' u', i')
 
 --------------------------------------------------------------------------------
 
@@ -326,19 +359,25 @@ prettyTerm = go
     go ns p = \case
       Var (Index i) -> showString (ns !! i)
       Type -> showString "Type"
+      Pi "_" a b ->
+        par p piP $ go ns sigmaP a . showString " → " . go ("_" : ns) piP b
       Pi (freshen ns -> n) a b ->
         par p piP $ piBind n ns a . goPi (n : ns) b
       Lam (freshen ns -> n) t ->
         par p absP $
           showString "λ " . shows n . goAbs (n : ns) t
       t :@ u -> par p appP $ go ns appP t . showChar ' ' . go ns projP u
+      Sigma "_" a b ->
+        par p sigmaP $ go ns appP a . showString " × " . go ("_" : ns) sigmaP b
       Sigma (freshen ns -> n) a b ->
         par p sigmaP $ piBind n ns a . showString " × " . go (n : ns) sigmaP b
       Fst t -> par p projP $ go ns projP t . showString ".1"
       Snd t -> par p projP $ go ns projP t . showString ".2"
-      Pair t u -> par p pairP $ go ns absP t . showString ", " . go ns pairP u
+      Pair t u -> par p pairP $ go ns absP t . showString " , " . go ns pairP u
       Unit -> showString "Unit"
       TT -> showString "tt"
+      Eq a t u -> showString "Eq " . go ns projP a . showChar ' ' . go ns projP t . showChar ' ' . go ns projP u
+      Sym t -> showString "sym " . go ns projP t
 
     piBind n ns a =
       showString "("
@@ -348,6 +387,7 @@ prettyTerm = go
         . showChar ')'
 
     goPi ns = \case
+      Pi "_" a b -> showString " → " . go ns sigmaP a . showString " → " . go ("_" : ns) piP b
       Pi (freshen ns -> n) a b ->
         showChar ' ' . piBind n ns a . goPi (n : ns) b
       b -> showString " → " . go ns piP b
@@ -366,6 +406,7 @@ prettyIso' =
     SigmaUnitL -> "ΣUnitL"
     SigmaUnitR -> "ΣUnitR"
     PiUnitL -> "ΠUnitL"
+    EqComm -> "=Comm"
 
 prettyIsoCong' :: Int -> IsoCong' -> ShowS
 prettyIsoCong' p = \case

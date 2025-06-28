@@ -50,6 +50,7 @@ module Elim {a p} {A : Type a} {P : Levels A → Type p}
       (cong f p) (cong f q)
       (trunc xs ys p q) i j
 
+
 module ElimProp {a p} {A : Type a} {P : Levels A → Type p}
   ([]* : P [])
   (_∷*_ : ∀ x {xs} → P xs → P (x ∷ xs))
@@ -65,6 +66,7 @@ module ElimProp {a p} {A : Type a} {P : Levels A → Type p}
         (y ∷* (x ∷* xs*))))
     (λ xs → isProp→isSet (PProp xs))
 
+
 module Rec {a b} {A : Type a} {B : Type b}
   ([]* : B)
   (_∷*_ : A → B → B)
@@ -76,11 +78,12 @@ module Rec {a b} {A : Type a} {B : Type b}
   f : Levels A → B
   f = Elim.f []* (λ x xs → x ∷* xs) (λ xs → ▹* xs) (λ x y xs → swap* x y xs) (λ _ → BSet)
 
+
 -- Left biased, consume _∷_ first
 module Elim2 {a b p} {A : Type a} {B : Type b} {P : Levels A → Levels B → Type p}
   ([]- : ∀ us → P [] us)
   (∷- : ∀ x {xs us} → P xs us → P (x ∷ xs) us)
-  (▹[] : ∀ {xs} → P xs [] → P (▹ xs) [])
+  (▹[] : ∀ xs → P (▹ xs) [])
   (▹∷ : ∀ u {xs us} → P (▹ xs) us → P (▹ xs) (u ∷ us))
   (▹▹ : ∀ {xs us} → P xs us → P (▹ xs) (▹ us))
   (swap- : ∀ x y {xs us} (ih : P xs us)
@@ -93,7 +96,7 @@ module Elim2 {a b p} {A : Type a} {B : Type b} {P : Levels A → Levels B → Ty
   f : ∀ xs ys → P xs ys
   f [] ys = []- ys
   f (x ∷ xs) ys = ∷- x (f xs ys)
-  f (▹ xs) [] = ▹[] (f xs [])
+  f (▹ xs) [] = ▹[] xs
   f (▹ xs) (x ∷ ys) = ▹∷ x (f (▹ xs) ys)
   f (▹ xs) (▹ ys) = ▹▹ (f xs ys)
   f (swap x y xs i) ys = swap- x y (f xs ys) i
@@ -109,10 +112,11 @@ module Elim2 {a b p} {A : Type a} {B : Type b} {P : Levels A → Levels B → Ty
       (cong (flip f zs) p) (cong (flip f zs) q)
       (trunc xs ys p q) i j
 
+
 module ElimProp2 {a b p} {A : Type a} {B : Type b} {P : Levels A → Levels B → Type p}
   ([]- : ∀ ys → P [] ys)
   (∷- : ∀ x {xs ys} → P xs ys → P (x ∷ xs) ys)
-  (▹[] : ∀ {xs} → P xs [] → P (▹ xs) [])
+  (▹[] : ∀ xs → P (▹ xs) [])
   (▹∷ : ∀ x {xs ys} → P (▹ xs) ys → P (▹ xs) (x ∷ ys))
   (▹▹ : ∀ {xs ys} → P xs ys → P (▹ xs) (▹ ys))
   (PProp : ∀ xs ys → isProp (P xs ys))
@@ -130,10 +134,11 @@ module ElimProp2 {a b p} {A : Type a} {B : Type b} {P : Levels A → Levels B �
         (▹∷ y (▹∷ x ih))))
     (λ xs ys → isProp→isSet (PProp xs ys))
 
+
 module Rec2 {a b c} {A : Type a} {B : Type b} {C : Type c}
   ([]- : Levels B → C)
   (∷- : A → C → C)
-  (▹[] : C → C)
+  (▹[] : Levels A → C)
   (▹∷ : B → C → C)
   (▹▹ : C → C)
   (swap- : ∀ x y xs → ∷- x (∷- y xs) ≡ ∷- y (∷- x xs))
@@ -167,7 +172,7 @@ abstract
   <|>IdL xs = refl
 
   <|>IdR : (xs : Levels A) → (xs <|> []) ≡ xs
-  <|>IdR = ElimProp.f refl (λ x → cong (x ∷_)) (cong ▹_) (λ _ → trunc _ _)
+  <|>IdR = ElimProp.f refl (λ x → cong (x ∷_)) (λ _ → refl) (λ _ → trunc _ _)
 
   ∷<|>Interchange : (x : A) (xs ys : Levels A) → (x ∷ xs <|> ys) ≡ (xs <|> x ∷ ys)
   ∷<|>Interchange x = ElimProp2.f
@@ -183,7 +188,7 @@ abstract
     ElimProp2.f
       (λ ys → sym (<|>IdR ys))
       (λ x {xs ys} eq → cong (x ∷_) eq ∙ ∷<|>Interchange x ys xs)
-      (cong ▹_)
+      (λ _ → refl)
       (λ x → cong (x ∷_))
       (cong ▹_)
       (λ _ _ → trunc _ _)
@@ -195,7 +200,7 @@ abstract
   <|>Assoc = ElimProp2.f
     (λ _ _ → refl)
     (λ x ih zs → cong (x ∷_) (ih zs))
-    (λ {xs} _ zs → cong (_<|> zs) (<|>IdR (▹ xs)))
+    (λ _ _ → refl)
     (λ y ih zs → cong (y ∷_) (ih zs))
     (λ {xs ys} ih → ElimProp.f
       (<|>IdR (▹ xs <|> ▹ ys) ∙ cong (▹ xs <|>_) (sym (<|>IdR (▹ ys))))
@@ -219,8 +224,8 @@ xs >> ys = xs >>= λ _ → ys
 
 _<*>_ : Levels (A → B) → Levels A → Levels B
 fs <*> xs = do
-  f <- fs
-  x <- xs
+  f ← fs
+  x ← xs
   pure (f x)
 
 abstract
@@ -239,7 +244,7 @@ abstract
   >>=DistL<|> xs ys h = ElimProp2.f
     (λ _ → refl)
     (λ x {us vs} ih → cong (h x <|>_) ih ∙ sym (<|>Assoc (h x) (us >>= h) (vs >>= h)))
-    (cong ▹_)
+    (λ _ → refl)
     (λ x {us vs} ih → cong (h x <|>_) ih ∙ <|>Swap (h x) (▹ us >>= h) (vs >>= h))
     (cong ▹_)
     (λ us vs → trunc (us <|> vs >>= h) ((us >>= h) <|> (vs >>= h)))
