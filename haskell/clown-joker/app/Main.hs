@@ -45,26 +45,24 @@ instance (GDissectable f) => GDissectable (M1 i c f) where
 
 --------------------------------------------------------------------------------
 
-newtype WrappedDissected p a b = WrappedDissected
-  { unWrappedDissected :: Dissected p a b
+newtype WrappedDissected p a b = WrapDissected
+  { unwrapDissected :: Dissected p a b
   }
 
-instance (Bifunctor (Dissected p)) => Functor (WrappedDissected p a) where
-  fmap f (WrappedDissected x) = WrappedDissected (second f x)
+deriving newtype instance (Bifunctor (Dissected p)) => Functor (WrappedDissected p a)
 
-instance (Bifunctor (Dissected p)) => Bifunctor (WrappedDissected p) where
-  bimap f g (WrappedDissected x) = WrappedDissected (bimap f g x)
+deriving newtype instance (Bifunctor (Dissected p)) => Bifunctor (WrappedDissected p)
 
 instance (Dissectable p) => GDissectable (Rec1 p) where
   -- Replacing with Dissected p causes a reduction stack overflow!
   type GDissected (Rec1 p) = WrappedDissected p
 
   gright =
-    bimap (second WrappedDissected) Rec1
+    bimap (second WrapDissected) Rec1
       . right
-      . bimap unRec1 (first unWrappedDissected)
+      . bimap unRec1 (first unwrapDissected)
 
-  gplug a (WrappedDissected x) = Rec1 $ plug a x
+  gplug a (WrapDissected x) = Rec1 $ plug a x
 
 --------------------------------------------------------------------------------
 
@@ -161,7 +159,6 @@ instance (Dissectable p, GDissectable q) => GDissectable (p :.: q) where
 
 --------------------------------------------------------------------------------
 
--- tmap :: (Recursive a, Dissectable (Base a)) => (a -> b) ->
 tmap :: (Dissectable f) => (a -> b) -> f a -> f b
 tmap f t = go (right (Left t))
   where
