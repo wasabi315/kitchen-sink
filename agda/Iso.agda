@@ -1,206 +1,337 @@
+{-# OPTIONS --cubical-compatible --safe #-}
+
 module Iso where
 
-open import Level using (0ℓ)
-open import Axiom.Extensionality.Propositional using (Extensionality)
-open import Data.Fin as Fin using (Fin; zero; suc)
-open import Data.Fin.Properties as Fin using ()
-open import Data.List as List using (List; []; _∷_)
-open import Data.List.Properties as List using ()
-open import Data.List.Relation.Binary.Pointwise as Pointwise using (Pointwise; []; _∷_)
-open import Data.List.Relation.Binary.Permutation.Homogeneous as Perm using (Permutation; refl; prep; swap)
-open import Data.Nat using (ℕ; zero; suc)
-open import Data.Product using (_×_; _,_; proj₁; proj₂; curry; uncurry)
-open import Data.Product.Algebra using (×-assoc; ×-comm)
-open import Data.Product.Function.NonDependent.Propositional using (_×-↔_)
-open import Data.Sum as Sum using (_⊎_; inj₁; inj₂)
-open import Data.Unit using (⊤; tt)
-open import Data.Vec as Vec using (Vec; []; _∷_)
-open import Function using (_∘_; _$_; const; flip; _↔_; mk↔; mk↔ₛ′; Inverse)
-open import Function.Properties.Inverse using (↔-refl; ↔-sym; ↔-trans; ↔-fun)
-open import Relation.Binary.PropositionalEquality using (_≡_; refl; sym; trans; cong′)
+open import Level
+open import Axiom.Extensionality.Propositional
+open import Function.Base
+open import Function.Bundles
+open import Function.Properties.Inverse using (↔-sym)
+open import Function.Properties.Inverse.HalfAdjointEquivalence
+open import Relation.Binary.PropositionalEquality
 
 private
   variable
-    m n : ℕ
+    A B C D : Set
+    F G H : A → Set
 
-infixr 40 _⇒_ _⇒ⁿ_
-infixr 50 _*_ _*ⁿ_
+infixr 5 _,_
 
---------------------------------------------------------------------------------
--- Some lemmas
-
-×-identityˡ : (A : Set) → (⊤ × A) ↔ A
-×-identityˡ _ = mk↔ₛ′ proj₂ (tt ,_) cong′ cong′
-
-×-identityʳ : (A : Set) → (A × ⊤) ↔ A
-×-identityʳ _ = mk↔ₛ′ proj₁ (_, tt) cong′ cong′
-
-→-identityˡ : (A : Set) → (⊤ → A) ↔ A
-→-identityˡ _ = mk↔ₛ′ (_$ tt) const cong′ cong′
-
-→-distribˡ-× : (A B C : Set) → (A → B × C) ↔ ((A → B) × (A → C))
-→-distribˡ-× _ _ _ =
-  mk↔ₛ′ (λ f → (proj₁ ∘ f) , (proj₂ ∘ f)) (λ (f , g) x → (f x , g x)) cong′ cong′
-
-curry↔ : (A B C : Set) → (A → B → C) ↔ (A × B → C)
-curry↔ _ _ _ = mk↔ₛ′ uncurry curry cong′ cong′
-
-module _ {A B : Set} (A↔B : A ↔ B) where
-  open Inverse A↔B
-
-  List-↔ : List A ↔ List B
-  List-↔ =
-    mk↔ₛ′ (List.map to) (List.map from)
-      (λ xs → trans (sym (List.map-∘ xs)) (trans (List.map-cong strictlyInverseˡ xs) (List.map-id xs)))
-      (λ ys → trans (sym (List.map-∘ ys)) (trans (List.map-cong strictlyInverseʳ ys) (List.map-id ys)))
+open Inverse
 
 --------------------------------------------------------------------------------
 
-data Ty (n : ℕ) : Set where
-  var  : (i : Fin n) → Ty n
-  unit : Ty n
-  _*_  : (α β : Ty n) → Ty n
-  _⇒_  : (α β : Ty n) → Ty n
-  list : (α : Ty n) → Ty n
+record ⊤η : Set where
+  constructor tt
+record ⊤  : Set where
+  no-eta-equality
+  pattern
+  constructor tt
 
-⟦_⟧ : Ty n → (Vec Set n → Set)
-⟦ var i  ⟧ ρ = Vec.lookup ρ i
-⟦ unit   ⟧ ρ = ⊤
-⟦ α * β  ⟧ ρ = ⟦ α ⟧ ρ × ⟦ β ⟧ ρ
-⟦ α ⇒ β  ⟧ ρ = ⟦ α ⟧ ρ → ⟦ β ⟧ ρ
-⟦ list α ⟧ ρ = List (⟦ α ⟧ ρ)
+record Ση (A : Set) (F : A → Set) : Set where
+  constructor _,_
+  field
+    fstη : A
+    sndη : F fstη
 
---------------------------------------------------------------------------------
--- Normal Form
+open Ση
 
-mutual
+_×η_ : Set → Set → Set
+_×η_ A B = Ση A (λ _ → B)
 
-  NF : ℕ → Set
-  NF = List ∘ Factor
+record Σ (A : Set) (F : A → Set) : Set where
+  no-eta-equality
+  pattern
+  constructor _,_
+  field
+    fst : A
+    snd : F fst
 
-  data Factor (n : ℕ) : Set where
-    _⇒_ : (α : NF n) (β : Atom n) → Factor n
+open Σ
 
-  data Atom (n : ℕ) : Set where
-    var  : (i : Fin n) → Atom n
-    list : (α : NF n) → Atom n
+_×_ : Set → Set → Set
+_×_ A B = Σ A (λ _ → B)
 
+⊤η-weak : (x : ⊤) → tt ≡ x
+⊤η-weak tt = refl
 
-mutual
+Ση-weak : (x : Σ A F) → fst x , snd x ≡ x
+Ση-weak (x , y) = refl
 
-  ⟦_⟧ⁿ : NF n → (Vec Set n → Set)
-  ⟦ []    ⟧ⁿ ρ = ⊤
-  ⟦ α ∷ β ⟧ⁿ ρ = ⟦ α ⟧ᶠ ρ × ⟦ β ⟧ⁿ ρ
+Ση-≡,≡→≡ : {p₁@(a₁ , b₁) p₂@(a₂ , b₂) : Ση A F}
+  → Ση (a₁ ≡ a₂) (λ p → subst F p b₁ ≡ b₂) → p₁ ≡ p₂
+Ση-≡,≡→≡ (refl , refl) = refl
 
-  ⟦_⟧ᶠ : Factor n → (Vec Set n → Set)
-  ⟦ α ⇒ β ⟧ᶠ ρ = ⟦ α ⟧ⁿ ρ → ⟦ β ⟧ᵃ ρ
+Ση-≡,≡→≡′ : {p₁@(a₁ , b₁) p₂@(a₂ , b₂) : Ση A F}
+  → Ση (a₁ ≡ a₂) (λ p → b₁ ≡ subst F (sym p) b₂) → p₁ ≡ p₂
+Ση-≡,≡→≡′ (refl , refl) = refl
 
-  ⟦_⟧ᵃ : Atom n → (Vec Set n → Set)
-  ⟦ var i  ⟧ᵃ ρ = Vec.lookup ρ i
-  ⟦ list α ⟧ᵃ ρ = List (⟦ α ⟧ⁿ ρ)
+Σ-≡,≡→≡ : {p₁@(a₁ , b₁) p₂@(a₂ , b₂) : Σ A F}
+  → Σ (a₁ ≡ a₂) (λ p → subst F p b₁ ≡ b₂) → p₁ ≡ p₂
+Σ-≡,≡→≡ {p₁ = _ , _} {p₂ = _ , _} (refl , refl) = refl
 
-
-unitⁿ : NF n
-unitⁿ = []
-
-_*ⁿ_ : NF n → NF n → NF n
-_*ⁿ_ = List._++_
-
-atom : Atom n → NF n
-atom α = List.[ unitⁿ ⇒ α ]
-
-varⁿ : Fin n → NF n
-varⁿ = atom ∘ var
-
-listⁿ : NF n → NF n
-listⁿ = atom ∘ list
-
-_⇒ⁿ_ : NF n → NF n → NF n
-_⇒ⁿ_ α = List.map λ { (β ⇒ i) → (α *ⁿ β) ⇒ i }
-
-reduce : Ty n → NF n
-reduce (var i)  = varⁿ i
-reduce unit     = unitⁿ
-reduce (α * β)  = reduce α *ⁿ reduce β
-reduce (α ⇒ β)  = reduce α ⇒ⁿ reduce β
-reduce (list α) = listⁿ (reduce α)
+Σ-≡,≡→≡′ : {p₁@(a₁ , b₁) p₂@(a₂ , b₂) : Σ A F}
+  → Σ (a₁ ≡ a₂) (λ p → b₁ ≡ subst F (sym p) b₂) → p₁ ≡ p₂
+Σ-≡,≡→≡′ {p₁ = _ , _} {p₂ = _ , _} (refl , refl) = refl
 
 --------------------------------------------------------------------------------
 
-*ⁿ-homo-× : ∀ (α β : NF n) ρ → (⟦ α ⟧ⁿ ρ × ⟦ β ⟧ⁿ ρ) ↔ ⟦ α *ⁿ β ⟧ⁿ ρ
-*ⁿ-homo-× []      β ρ = ×-identityˡ _
-*ⁿ-homo-× (α ∷ β) γ ρ = ↔-trans (×-assoc _ _ _ _) (↔-refl ×-↔ (*ⁿ-homo-× β γ ρ))
+Ση-⊤ηₗ : Ση ⊤η F ↔ F tt
+Ση-⊤ηₗ = mk↔ₛ′
+  (λ (tt , x) → x)
+  (λ x → tt , x)
+  (λ _ → refl)
+  (λ _ → refl)
 
-module _ (ext : ∀ {a b} → Extensionality a b) where
+Σ-⊤ηₗ : Σ ⊤η F ↔ F tt
+Σ-⊤ηₗ = mk↔ₛ′
+  (λ (tt , x) → x)
+  (λ x → tt , x)
+  (λ _ → refl)
+  (λ { (_ , _) → refl })
 
-  →-zeroʳ : (A : Set) → (A → ⊤) ↔ ⊤
-  →-zeroʳ _ = mk↔ₛ′ (const tt) const cong′ (λ _ → ext {0ℓ} cong′)
+Ση-⊤ₗ : Ση ⊤ F ↔ F tt
+Ση-⊤ₗ = mk↔ₛ′
+  (λ (tt , x) → x)
+  (λ x → tt , x)
+  (λ _ → refl)
+  (λ { (tt , _) → refl })
 
-  ⇒ⁿ-homo-→ : ∀ (α β : NF n) ρ → (⟦ α ⟧ⁿ ρ → ⟦ β ⟧ⁿ ρ) ↔ ⟦ α ⇒ⁿ β ⟧ⁿ ρ
-  ⇒ⁿ-homo-→ α []          ρ = →-zeroʳ _
-  ⇒ⁿ-homo-→ α (β ⇒ i ∷ γ) ρ =
-    ↔-trans
-      (→-distribˡ-× _ _ _)
-      (↔-trans (curry↔ _ _ _) (↔-fun ext (*ⁿ-homo-× _ _ _) ↔-refl) ×-↔ ⇒ⁿ-homo-→ α γ ρ)
+Σ-⊤ₗ : Σ ⊤ F ↔ F tt
+Σ-⊤ₗ = mk↔ₛ′
+  (λ (tt , x) → x)
+  (λ x → tt , x)
+  (λ _ → refl)
+  (λ { (tt , _) → refl })
 
-  reduce↔ : ∀ (α : Ty n) ρ → ⟦ α ⟧ ρ ↔ ⟦ reduce α ⟧ⁿ ρ
-  reduce↔ (var i)  ρ = ↔-sym (↔-trans (×-identityʳ _) (→-identityˡ _))
-  reduce↔ unit     ρ = ↔-refl
-  reduce↔ (α * β)  ρ = ↔-trans (reduce↔ α ρ ×-↔ reduce↔ β ρ) (*ⁿ-homo-× _ _ _)
-  reduce↔ (α ⇒ β)  ρ = ↔-trans (↔-fun ext (reduce↔ α ρ) (reduce↔ β ρ)) (⇒ⁿ-homo-→ _ _ _)
-  reduce↔ (list α) ρ = ↔-trans (List-↔ (reduce↔ α ρ)) (↔-sym (↔-trans (×-identityʳ _) (→-identityˡ _)))
+×η-⊤ηᵣ : A ×η ⊤η ↔ A
+×η-⊤ηᵣ = mk↔ₛ′
+  (λ (a , _) → a)
+  (λ a → a , tt)
+  (λ _ → refl)
+  (λ _ → refl)
 
---------------------------------------------------------------------------------
+×η-⊤ᵣ : A ×η ⊤ ↔ A
+×η-⊤ᵣ = mk↔ₛ′
+  (λ (a , _) → a)
+  (λ a → a , tt)
+  (λ _ → refl)
+  (λ { (_ , tt) → refl })
 
-mutual
+×-⊤ηᵣ : A × ⊤η ↔ A
+×-⊤ηᵣ = mk↔ₛ′
+  (λ (a , _) → a)
+  (λ a → a , tt)
+  (λ _ → refl)
+  (λ { (_ , _) → refl })
 
-  _≅ⁿ_ : NF n → NF n → Set
-  _≅ⁿ_ = Permutation _≅ᶠ_
+×-⊤ᵣ : A × ⊤ ↔ A
+×-⊤ᵣ = mk↔ₛ′
+  (λ (a , _) → a)
+  (λ a → a , tt)
+  (λ _ → refl)
+  (λ { (_ , tt) → refl })
 
-  data _≅ᶠ_ {n} : Factor n → Factor n → Set where
-    _⇒_ : ∀ {α β γ δ} → α ≅ⁿ β → γ ≅ᵃ δ → α ⇒ γ ≅ᶠ β ⇒ δ
+×η-comm : A ×η B ↔ B ×η A
+×η-comm = mk↔ₛ′
+  (λ (a , b) → b , a)
+  (λ (b , a) → a , b)
+  (λ _ → refl)
+  (λ _ → refl)
 
-  data _≅ᵃ_ {n} : Atom n → Atom n → Set where
-    var : ∀ {i j} → i ≡ j → var i ≅ᵃ var j
-    list : ∀ {α β} → α ≅ⁿ β → list α ≅ᵃ list β
+×-comm : A × B ↔ B × A
+×-comm = mk↔ₛ′
+  (λ (a , b) → b , a)
+  (λ (b , a) → a , b)
+  (λ { (_ , _) → refl }) -- needs pattern matching
+  (λ { (_ , _) → refl })
 
---------------------------------------------------------------------------------
+Ση-assoc : Ση (Ση A F) G ↔ Ση A (λ a → Ση (F a) λ b → G (a , b))
+Ση-assoc = mk↔ₛ′
+  (λ ((a , b) , c) → a , b , c)
+  (λ (a , b , c) → ((a , b) , c))
+  (λ _ → refl)
+  (λ _ → refl)
 
-Pointwise-⟦⟧ : ∀ {α β : NF n} {ρ}
-  → Pointwise (λ γ δ → ⟦ γ ⟧ᶠ ρ ↔ ⟦ δ ⟧ᶠ ρ) α β
-  → ⟦ α ⟧ⁿ ρ ↔ ⟦ β ⟧ⁿ ρ
-Pointwise-⟦⟧ []          = ↔-refl
-Pointwise-⟦⟧ (α≅β ∷ γ≅δ) = α≅β ×-↔ Pointwise-⟦⟧ γ≅δ
+Σ-assoc : Σ (Σ A F) G ↔ Σ A (λ a → Σ (F a) λ b → G (a , b))
+Σ-assoc = mk↔ₛ′
+  (λ ((a , b) , c) → a , b , c)
+  (λ (a , b , c) → ((a , b) , c))
+  (λ { (_ , _ , _) → refl })
+  (λ { ((_ , _) , _) → refl })
 
-module _ (ext : ∀ {a b} → Extensionality a b) where
+Ση-curry : ((p : Ση A F) → G p) ↔ ((x : A) (y : F x) → G (x , y))
+Ση-curry = mk↔ₛ′
+  (λ f x y → f (x , y))
+  (λ f (x , y) → f x y)
+  (λ _ → refl)
+  (λ _ → refl)
 
-  {-# TERMINATING #-}
-  mutual
+Σ-curry : Extensionality _ _ → ((p : Σ A F) → G p) ↔ ((x : A) (y : F x) → G (x , y))
+Σ-curry funExt = mk↔ₛ′
+  (λ f x y → f (x , y))
+  (λ { f (x , y) → f x y }) -- needs pattern matching
+  (λ _ → refl)
+  (λ f → funExt λ { (x , y) → refl }) -- needs pattern matching and funext
 
-    ≅→↔ⁿ : {α β : NF n} → α ≅ⁿ β → ∀ ρ → ⟦ α ⟧ⁿ ρ ↔ ⟦ β ⟧ⁿ ρ
-    ≅→↔ⁿ (refl α≅β)           ρ = Pointwise-⟦⟧ (Pointwise.map (flip ≅→↔ᶠ ρ) α≅β)
-    ≅→↔ⁿ (prep α≅β γ≅δ)       ρ = ≅→↔ᶠ α≅β ρ ×-↔ ≅→↔ⁿ γ≅δ ρ
-    ≅→↔ⁿ (swap α≅β γ≅δ σ≅τ)   ρ =
-      ↔-trans  (≅→↔ᶠ α≅β ρ ×-↔ ≅→↔ᶠ γ≅δ ρ ×-↔ ≅→↔ⁿ σ≅τ ρ)
-        (↔-trans (↔-sym (×-assoc _ _ _ _))
-          (↔-trans (×-comm _ _ ×-↔ ↔-refl)
-            (×-assoc _ _ _ _)))
-    ≅→↔ⁿ (Perm.trans α≅β γ≅δ) ρ = ↔-trans (≅→↔ⁿ α≅β ρ) (≅→↔ⁿ γ≅δ ρ)
+Π-⊤ηₗ : ((x : ⊤η) → F x) ↔ F tt
+Π-⊤ηₗ = mk↔ₛ′
+  (λ f → f tt)
+  (λ x _ → x)
+  (λ _ → refl)
+  (λ _ → refl)
 
-    ≅→↔ᶠ : {α β : Factor n} → α ≅ᶠ β → ∀ ρ → ⟦ α ⟧ᶠ ρ ↔ ⟦ β ⟧ᶠ ρ
-    ≅→↔ᶠ (α≅β ⇒ γ≅δ) ρ = ↔-fun ext (≅→↔ⁿ α≅β ρ) (≅→↔ᵃ γ≅δ ρ)
+Π-⊤ₗ : Extensionality _ _ → ((x : ⊤) → F x) ↔ F tt
+Π-⊤ₗ funExt = mk↔ₛ′
+  (λ f → f tt)
+  (λ { x tt → x }) -- needs pattern matching
+  (λ _ → refl)
+  (λ f → funExt λ { tt → refl }) -- needs pattern matching and funext
 
-    ≅→↔ᵃ : {α β : Atom n} → α ≅ᵃ β → ∀ ρ → ⟦ α ⟧ᵃ ρ ↔ ⟦ β ⟧ᵃ ρ
-    ≅→↔ᵃ (var refl) ρ = ↔-refl
-    ≅→↔ᵃ (list α≅β) ρ = List-↔ (≅→↔ⁿ α≅β ρ)
+→-⊤ηᵣ : (A → ⊤η) ↔ ⊤η
+→-⊤ηᵣ = mk↔ₛ′
+  (λ _ → tt)
+  (λ x _ → x)
+  (λ _ → refl)
+  (λ _ → refl)
 
+→-⊤ᵣ : Extensionality _ _ → (A → ⊤) ↔ ⊤
+→-⊤ᵣ funExt = mk↔ₛ′
+  (λ _ → tt)
+  (λ x _ → x)
+  (λ { tt → refl })
+  (λ f → funExt λ x → ⊤η-weak (f x))
 
-  theorem : {α β : Ty n} → reduce α ≅ⁿ reduce β → ∀ ρ → ⟦ α ⟧ ρ ↔ ⟦ β ⟧ ρ
-  theorem {α = α} {β} α≅β ρ =
-    ↔-trans (reduce↔ ext α ρ)
-      (↔-trans (≅→↔ⁿ α≅β ρ)
-        (↔-sym (reduce↔ ext β ρ)))
+ΠΣη-dist : ((x : A) → Ση B F) ↔ (Ση ((x : A) → B) λ f → (x : A) → F (f x))
+ΠΣη-dist = mk↔ₛ′
+  (λ f → (λ x → fstη (f x)) , (λ x → sndη (f x)))
+  (λ (f , g) x → f x , g x)
+  (λ { (f , g) → refl })
+  (λ _ → refl)
 
-  -- If we have a decision procedure for _≅ⁿ_, we can provide a function of type:
-  --   (α β : Ty n) → Dec (∀ ρ → ⟦ α ⟧ ρ ↔ ⟦ β ⟧ ρ),
-  -- which decides whether two types are isomorphic.
+ΠΣ-dist : Extensionality _ _ → ((x : A) → Σ B F) ↔ Σ ((x : A) → B) (λ f → (x : A) → F (f x))
+ΠΣ-dist funExt = mk↔ₛ′
+  (λ f → (λ x → fst (f x)) , (λ x → snd (f x)))
+  (λ (f , g) x → f x , g x)
+  (λ { (f , g) → refl })
+  (λ f → funExt λ x → Ση-weak (f x))
+
+×η-cong : A ↔ B → C ↔ D → A ×η C ↔ B ×η D
+×η-cong ab cd = mk↔ₛ′
+  (λ (a , c) → ab .to a , cd .to c)
+  (λ (b , d) → ab .from b , cd .from d)
+  (λ (b , d) → cong₂ _,_ (strictlyInverseˡ ab b) (strictlyInverseˡ cd d))
+  (λ (a , c) → cong₂ _,_ (strictlyInverseʳ ab a) (strictlyInverseʳ cd c))
+
+×-cong : A ↔ B → C ↔ D → A × C ↔ B × D
+×-cong ab cd = mk↔ₛ′
+  (λ (a , c) → ab .to a , cd .to c)
+  (λ (b , d) → ab .from b , cd .from d)
+  (λ { (b , d) → cong₂ _,_ (strictlyInverseˡ ab b) (strictlyInverseˡ cd d) })
+  (λ { (a , c) → cong₂ _,_ (strictlyInverseʳ ab a) (strictlyInverseʳ cd c) })
+
+→-cong : Extensionality _ _ → A ↔ B → C ↔ D → (A → C) ↔ (B → D)
+→-cong funExt ab cd = mk↔ₛ′
+  (λ f x → cd .to (f (ab .from x)))
+  (λ f x → cd .from (f (ab .to x)))
+  (λ f → funExt λ x → -- needs funext
+    begin
+      cd .to (cd .from (f (ab .to (ab .from x))))
+    ≡⟨ strictlyInverseˡ cd _ ⟩
+      f (ab .to (ab .from x))
+    ≡⟨ cong f (strictlyInverseˡ ab _) ⟩
+      f x
+    ∎)
+  (λ f → funExt λ x →
+    begin
+      cd .from (cd .to (f (ab .from (ab .to x))))
+    ≡⟨ strictlyInverseʳ cd _ ⟩
+      f (ab .from (ab .to x))
+    ≡⟨ cong f (strictlyInverseʳ ab _) ⟩
+      f x
+    ∎)
+  where open ≡-Reasoning
+
+Ση-cong : (ab : A ↔ B) (fg : {x : A} → F x ↔ G x) → Ση A F ↔ Ση B (G ∘ ab .from)
+Ση-cong {F = F} {G = G} ab fg = mk↔ₛ′
+  (λ (a , c) → ab .to a , subst G (sym (right-inverse-of a)) (fg .to c))
+  (λ (b , d) → ab .from b , fg .from d)
+  (λ (b , d) →
+    begin
+      ab .to (ab .from b) , subst G (sym (right-inverse-of (ab .from b))) (fg .to (fg .from d))
+    ≡⟨ cong (λ eq → ab .to (ab .from b) , subst G (sym eq) (fg .to (fg .from d))) (left-right b) ⟨
+      ab .to (ab .from b) , subst G (sym (cong (ab .from) (left-inverse-of b))) (fg .to (fg .from d))
+    ≡⟨ cong (λ eq → ab .to (ab .from b) , subst G eq (fg .to (fg .from d))) (sym-cong (left-inverse-of b)) ⟩
+      ab .to (ab .from b) , subst G (cong (ab .from) (sym (left-inverse-of b))) (fg .to (fg .from d))
+    ≡⟨ Ση-≡,≡→≡′ (left-inverse-of b , sym (subst-∘ (sym (left-inverse-of b)))) ⟩
+      b , fg .to (fg .from d)
+    ≡⟨ cong (b ,_) (strictlyInverseˡ fg d) ⟩
+      b , d
+    ∎)
+  (λ (a , c) →
+    begin
+      ab .from (ab .to a) , fg .from (subst G (sym (right-inverse-of a)) (fg .to c))
+    ≡⟨ cong (ab .from (ab .to a) ,_) (subst-application′ G (λ y → fg .from) (sym (right-inverse-of a))) ⟨
+      ab .from (ab .to a) , subst F (sym (right-inverse-of a)) (fg .from (fg .to c))
+    ≡⟨ Ση-≡,≡→≡′ ((right-inverse-of a) , cong (subst F (sym (right-inverse-of a))) (strictlyInverseʳ fg c)) ⟩
+      a , c
+    ∎)
+  where
+    open ≡-Reasoning
+    open _≃_ (↔⇒≃ (↔-sym ab)) -- half-adjoint equivalence
+
+Σ-cong : (ab : A ↔ B) (fg : {x : A} → F x ↔ G x) → Σ A F ↔ Σ B (G ∘ ab .from)
+Σ-cong {F = F} {G = G} ab fg = mk↔ₛ′
+  (λ (a , c) → ab .to a , subst G (sym (right-inverse-of a)) (fg .to c))
+  (λ (b , d) → ab .from b , fg .from d)
+  (λ { (b , d) →
+    begin
+      ab .to (ab .from b) , subst G (sym (right-inverse-of (ab .from b))) (fg .to (fg .from d))
+    ≡⟨ cong (λ eq → ab .to (ab .from b) , subst G (sym eq) (fg .to (fg .from d))) (left-right b) ⟨
+      ab .to (ab .from b) , subst G (sym (cong (ab .from) (left-inverse-of b))) (fg .to (fg .from d))
+    ≡⟨ cong (λ eq → ab .to (ab .from b) , subst G eq (fg .to (fg .from d))) (sym-cong (left-inverse-of b)) ⟩
+      ab .to (ab .from b) , subst G (cong (ab .from) (sym (left-inverse-of b))) (fg .to (fg .from d))
+    ≡⟨ Σ-≡,≡→≡′ (left-inverse-of b , sym (subst-∘ (sym (left-inverse-of b)))) ⟩
+      b , fg .to (fg .from d)
+    ≡⟨ cong (b ,_) (strictlyInverseˡ fg d) ⟩
+      b , d
+    ∎ })
+  (λ { (a , c) →
+    begin
+      ab .from (ab .to a) , fg .from (subst G (sym (right-inverse-of a)) (fg .to c))
+    ≡⟨ cong (ab .from (ab .to a) ,_) (subst-application′ G (λ y → fg .from) (sym (right-inverse-of a))) ⟨
+      ab .from (ab .to a) , subst F (sym (right-inverse-of a)) (fg .from (fg .to c))
+    ≡⟨ Σ-≡,≡→≡′ ((right-inverse-of a) , cong (subst F (sym (right-inverse-of a))) (strictlyInverseʳ fg c)) ⟩
+      a , c
+    ∎ })
+  where
+    open ≡-Reasoning
+    open _≃_ (↔⇒≃ (↔-sym ab)) -- half-adjoint equivalence
+
+Π-cong : Extensionality _ _ → (ab : A ↔ B) (fg : {x : A} → F x ↔ G x) → ((x : A) → F x) ↔ ((y : B) → G (ab .from y))
+Π-cong {F = F} {G = G} funExt ab fg = mk↔ₛ′
+  (λ f y → fg .to (f (ab .from y)))
+  (λ f x → subst F (right-inverse-of x) (fg .from (f (ab .to x))))
+  (λ f → funExt λ y → -- needs funext
+    begin
+      fg .to (subst F (right-inverse-of (ab .from y)) (fg .from (f (ab .to (ab .from y)))))
+    ≡⟨ cong (λ eq → fg .to (subst F eq (fg .from (f (ab .to (ab .from y)))))) (left-right y) ⟨
+      fg .to (subst F (cong (ab .from) (left-inverse-of y)) (fg .from (f (ab .to (ab .from y)))))
+    ≡⟨ subst-application F (λ x → fg .to) (left-inverse-of y) ⟨
+      subst (G ∘ ab .from) (left-inverse-of y) (fg .to (fg .from (f (ab .to (ab .from y)))))
+    ≡⟨ dcong (fg .to ∘ fg .from ∘ f) (left-inverse-of y) ⟩
+      fg .to (fg .from (f y))
+    ≡⟨ strictlyInverseˡ fg (f y) ⟩
+      f y
+    ∎)
+  (λ f → funExt λ x → -- needs funext
+    begin
+      subst F (right-inverse-of x) (fg .from (fg .to (f (ab .from (ab .to x)))))
+    ≡⟨ dcong (fg .from ∘ fg .to ∘ f) (right-inverse-of x) ⟩
+      fg .from (fg .to (f x))
+    ≡⟨ strictlyInverseʳ fg (f x) ⟩
+      f x
+    ∎)
+  where
+    open ≡-Reasoning
+    open _≃_ (↔⇒≃ (↔-sym ab)) -- half-adjoint equivalence
