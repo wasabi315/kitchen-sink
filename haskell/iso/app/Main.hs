@@ -11,9 +11,9 @@ main :: IO ()
 main = for_ [ex1, ex2, ex3] \t -> do
   putStrLn "----------------"
   putStrLn $ prettyTerm [] 0 t ""
-  let (t', i) = normalise t
+  let (t', i) = normalise0 t
   putStrLn $ prettyIso 0 i ""
-  putStrLn $ prettyTerm [] 0 (nf0 t') ""
+  putStrLn $ prettyTerm [] 0 t' ""
 
 ex1 :: Term
 ex1 = Pi "F" (Pi "_" (Pi "_" (Sigma "_" U U) U) U) $ Pi "G" (Pi "_" (Sigma "_" U U) U) $ Var 1 :@ Var 0
@@ -30,21 +30,18 @@ ex3 =
           Pi "q" (Sigma "y" (Var 3) (Var 3 :@ Var 0)) $
             Sigma "_" (Var 2 :@ Var 1) (Var 3 :@ Var 1)
 
+infixl 6 :@, @
+
 --------------------------------------------------------------------------------
+-- Terms
 
 type Name = String
 
 newtype Index = Index Int
   deriving newtype (Show, Ord, Eq, Num)
 
-newtype MetaVar = MetaVar Int
-  deriving newtype (Show, Ord, Eq, Num)
-
-infixl 6 :@
-
 data Term
   = Var Index
-  | Meta MetaVar
   | U
   | Pi Name Term Term
   | Lam Name Term
@@ -55,23 +52,117 @@ data Term
   | Snd Term
   deriving (Show)
 
+--------------------------------------------------------------------------------
+-- Values and NbE
+
+newtype Level = Level Int
+  deriving newtype (Eq, Ord, Num, Show)
+
+data Value
+  = VRigid Level Spine
+  | VU
+  | VPi Name Value (Value -> Value)
+  | VLam Name (Value -> Value)
+  | VSigma Name Value (Value -> Value)
+  | VPair Value Value
+
+data Spine
+  = SNil
+  | SApp Spine Value
+  | SFst Spine
+  | SSnd Spine
+
+pattern VVar :: Level -> Value
+pattern VVar x = VRigid x SNil
+
+type Env = [Value]
+
+eval :: Env -> Term -> Value
+eval env = \case
+  Var (Index x) -> env !! x
+  U -> VU
+  Pi x a b -> VPi x (eval env a) \v -> eval (v : env) b
+  Lam x t -> VLam x \v -> eval (v : env) t
+  t :@ u -> eval env t @ eval env u
+  Sigma x a b -> VSigma x (eval env a) \v -> eval (v : env) b
+  Pair t u -> VPair (eval env t) (eval env u)
+  Fst t -> vfst (eval env t)
+  Snd t -> vsnd (eval env t)
+
+(@) :: Value -> Value -> Value
+(@) = \cases
+  (VLam _ f) u -> f u
+  (VRigid x sp) u -> VRigid x (SApp sp u)
+  _ _ -> error "vapp: not a function"
+
+vfst :: Value -> Value
+vfst = \case
+  VPair t _ -> t
+  VRigid x sp -> VRigid x (SFst sp)
+  _ -> error "vfst: not a pair"
+
+vsnd :: Value -> Value
+vsnd = \case
+  VPair _ t -> t
+  VRigid x sp -> VRigid x (SSnd sp)
+  _ -> error "vsnd: not a pair"
+
+quote :: Level -> Value -> Term
+quote l = \case
+  VRigid x sp -> quoteSpine l (Var $ coerce (l - x - 1)) sp
+  VU -> U
+  VPi x a b -> Pi x (quote l a) (quote (l + 1) (b $ VVar l))
+  VLam x t -> Lam x (quote (l + 1) (t $ VVar l))
+  VSigma x a b -> Sigma x (quote l a) (quote (l + 1) (b $ VVar l))
+  VPair t u -> Pair (quote l t) (quote l u)
+
+quoteSpine :: Level -> Term -> Spine -> Term
+quoteSpine l hd = \case
+  SNil -> hd
+  SApp sp t -> quoteSpine l hd sp :@ quote l t
+  SFst t -> Fst $ quoteSpine l hd t
+  SSnd t -> Snd $ quoteSpine l hd t
+
+--------------------------------------------------------------------------------
+-- Isomorphisms
+
 data Iso
-  = -- | Γ |- A ~ A
+  = --  -------
+    --   A ~ A
     Refl
-  | -- | Γ |- A ~ B => Γ |- B ~ A
+  | --   A ~ B
+    --  -------
+    --   B ~ A
     Sym Iso
-  | -- | Γ |- A ~ B => Γ |- B ~ C => Γ |- A ~ C
+  | --   A ~ B    B ~ C
+    --  ----------------
+    --       A ~ C
     Trans Iso Iso
-  | -- | Γ |- (x : (y : A) * B[y]) * C[x] ~ (x : A) * (y : B[x]) * C[(x, y)]
+  | --  ----------------------------------------------------------------
+    --   (x : (y : A) * B[y]) * C[x] ~ (y : A) * (x : B[y]) * C[(x, y)]
     Assoc
-  | -- | Γ |- (x : A) * B ~ (x : B) * A
+  | --  ---------------
+    --   A * B ~ B * A
     Comm
-  | -- | Γ |- (x : (y : A) * B[y]) -> C[x] ~ (x : A) (y : B[x]) -> C[(x, y)]
+  | --  -------------------------------------------------------------------
+    --   (x : (y : A) * B[y]) -> C[x] ~ (y : A) -> (x : B[y]) -> C[(x, y)]
     Curry
-  | PiCongL Iso
-  | PiCongR Iso
-  | SigmaCongL Iso
-  | SigmaCongR Iso
+  | --                     i : A ~ A'
+    --  ---------------------------------------------------
+    --   (x : A) -> B[x] ~ (x : A') -> B[transportInv i x]
+    PiCongL Iso
+  | --             B[x] ~ B'[x]
+    --  ------------------------------------
+    --   (x : A) -> B[x] ~ (x : A) -> B'[x]
+    PiCongR Iso
+  | --                     i : A ~ A'
+    --  -------------------------------------------------
+    --   (x : A) * B[x] ~ (x : A') * B[transportInv i x]
+    SigmaCongL Iso
+  | --           B[x] ~ B'[x]
+    --  ----------------------------------
+    --   (x : A) * B[x] ~ (x : A) * B'[x]
+    SigmaCongR Iso
   deriving (Show)
 
 instance Semigroup Iso where
@@ -102,175 +193,80 @@ sigmaCongR = \case
   Refl -> Refl
   t -> SigmaCongR t
 
-type Subst = Index -> Term
+-- transport along an isomorphism
+transport :: Iso -> Value
+transport = \case
+  Refl -> VLam "x" id
+  Sym i -> transportInv i
+  Trans i j -> VLam "x" \x -> transport j @ (transport i @ x)
+  Assoc -> VLam "p" \p -> vfst (vfst p) `VPair` (vsnd (vfst p) `VPair` vsnd p)
+  Comm -> VLam "p" \p -> vsnd p `VPair` vfst p
+  Curry -> VLam "f" \f -> VLam "x" \x -> VLam "y" \y -> f @ VPair x y
+  PiCongL i -> VLam "f" \f -> VLam "x" \x -> f @ (transportInv i @ x)
+  PiCongR i -> VLam "f" \f -> VLam "x" \x -> transport i @ (f @ x)
+  SigmaCongL i -> VLam "p" \p -> (transport i @ vfst p) `VPair` vsnd p
+  SigmaCongR i -> VLam "p" \p -> vfst p `VPair` (transport i @ vsnd p)
 
-extendSubst :: Subst -> Subst
-extendSubst _ 0 = Var 0
-extendSubst s x = substitute (Var . (1 +)) (s (x - 1))
-
-substitute :: (Index -> Term) -> Term -> Term
-substitute subst = \case
-  Var x -> subst x
-  Meta m -> Meta m
-  U -> U
-  Pi x a b -> Pi x (substitute subst a) (substitute (extendSubst subst) b)
-  Lam x t -> Lam x (substitute (extendSubst subst) t)
-  t :@ u -> substitute subst t :@ substitute subst u
-  Sigma x a b -> Sigma x (substitute subst a) (substitute (extendSubst subst) b)
-  Pair t u -> Pair (substitute subst t) (substitute subst u)
-  Fst t -> Fst (substitute subst t)
-  Snd t -> Snd (substitute subst t)
+-- transport back
+transportInv :: Iso -> Value
+transportInv = \case
+  Refl -> VLam "x" id
+  Sym i -> transport i
+  Trans i j -> VLam "x" \x -> transportInv i @ (transportInv j @ x)
+  Assoc -> VLam "p" \p -> (vfst p `VPair` vfst (vsnd p)) `VPair` vsnd (vsnd p)
+  Comm -> VLam "p" \p -> vsnd p `VPair` vfst p
+  Curry -> VLam "f" \f -> VLam "p" \p -> f @ vfst p @ vsnd p
+  PiCongL i -> VLam "f" \f -> VLam "x" \x -> f @ (transport i @ x)
+  PiCongR i -> VLam "f" \f -> VLam "x" \x -> transportInv i @ (f @ x)
+  SigmaCongL i -> VLam "p" \p -> (transportInv i @ vfst p) `VPair` vsnd p
+  SigmaCongR i -> VLam "p" \p -> vfst p `VPair` (transportInv i @ vsnd p)
 
 --------------------------------------------------------------------------------
+-- Type normalisation
 
-to :: Iso -> Term
-to = \case
-  Refl -> Lam "x" $ Var 0
-  Sym i -> from i
-  Trans i j -> Lam "x" $ to j :@ (to i :@ Var 0)
-  Assoc -> Lam "p" $ Fst (Fst $ Var 0) `Pair` (Snd (Fst $ Var 0) `Pair` Snd (Var 0))
-  Comm -> Lam "p" $ Snd (Var 0) `Pair` Fst (Var 0)
-  Curry -> Lam "f" $ Lam "x" $ Lam "y" $ Var 2 :@ Pair (Var 1) (Var 0)
-  PiCongL i -> Lam "f" $ Lam "x" $ Var 1 :@ (from i :@ Var 0)
-  PiCongR i -> Lam "f" $ Lam "x" $ to i :@ (Var 1 :@ Var 0)
-  SigmaCongL i -> Lam "p" $ (to i :@ Fst (Var 0)) `Pair` Snd (Var 0)
-  SigmaCongR i -> Lam "p" $ Fst (Var 0) `Pair` (to i :@ Snd (Var 0))
+normalise0 :: Term -> (Term, Iso)
+normalise0 t = normalise [] 0 (eval [] t)
 
-from :: Iso -> Term
-from = \case
-  Refl -> Lam "x" $ Var 0
-  Sym i -> to i
-  Trans i j -> Lam "x" $ from i :@ (from j :@ Var 0)
-  Assoc -> Lam "p" $ (Fst (Var 0) `Pair` Fst (Snd $ Var 0)) `Pair` Snd (Snd $ Var 0)
-  Comm -> Lam "p" $ Snd (Var 0) `Pair` Fst (Var 0)
-  Curry -> Lam "f" $ Lam "p" $ Var 1 :@ Fst (Var 0) :@ Snd (Var 0)
-  PiCongL i -> Lam "f" $ Lam "x" $ Var 1 :@ (to i :@ Var 0)
-  PiCongR i -> Lam "f" $ Lam "x" $ from i :@ (Var 1 :@ Var 0)
-  SigmaCongL i -> Lam "p" $ (from i :@ Fst (Var 0)) `Pair` Snd (Var 0)
-  SigmaCongR i -> Lam "p" $ Fst (Var 0) `Pair` (from i :@ Snd (Var 0))
-
-normalise :: Term -> (Term, Iso)
-normalise = \case
-  Pi x a b ->
-    let (a', ia) = normalise a
-        b' = flip substitute b \case
-          0 -> from ia :@ Var 0
-          n -> Var n
-        (b'', ib) = normalise b'
-        (t, i) = curry (Pi x a' b'')
+-- compute the normalised type and isomorphism to it
+normalise :: Env -> Level -> Value -> (Term, Iso)
+normalise env l = \case
+  VPi x a b ->
+    let (a', ia) = normalise env l a
+        (b', ib) = normalise (VVar l : env) (l + 1) (b $ transportInv ia @ VVar l)
+        (t, i) = curry l $ eval env (Pi x a' b')
      in (t, piCongL ia <> piCongR ib <> i)
-  Sigma x a b ->
-    let (a', ia) = normalise a
-        b' = flip substitute b \case
-          0 -> from ia :@ Var 0
-          n -> Var n
-        (b'', ib) = normalise b'
-        (t, i) = assoc (Sigma x a' b'')
+  VSigma x a b ->
+    let (a', ia) = normalise env l a
+        (b', ib) = normalise (VVar l : env) (l + 1) (b $ transportInv ia @ VVar l)
+        (t, i) = assoc l $ eval env (Sigma x a' b')
      in (t, sigmaCongL ia <> sigmaCongR ib <> i)
-  t -> (t, mempty)
+  v -> (quote l v, mempty)
 
-curry :: Term -> (Term, Iso)
-curry = \case
-  Pi x (Sigma y a b) c ->
-    let t = Pi y a $ Pi x b $ flip substitute c \case
-          0 -> Var 1 `Pair` Var 0
-          n -> Var (n + 1)
-        (t', i) = curry t
-     in (t', Curry <> i)
-  Pi x a b ->
-    let (b', i) = curry b
-     in (Pi x a b', piCongR i)
-  t -> (t, mempty)
+-- curryify top-level pi types
+curry :: Level -> Value -> (Term, Iso)
+curry l = \case
+  VPi x (VSigma y a b) c ->
+    let v = VPi y a \u -> VPi x (b u) \w -> c (VPair u w)
+        (t, i) = curry l v
+     in (t, Curry <> i)
+  VPi x a b ->
+    let a' = quote l a
+        (b', i) = curry (l + 1) (b $ VVar l)
+     in (Pi x a' b', piCongR i)
+  v -> (quote l v, mempty)
 
-assoc :: Term -> (Term, Iso)
-assoc = \case
-  Sigma x (Sigma y a b) c ->
-    let t = Sigma y a $ Sigma x b $ flip substitute c \case
-          0 -> Var 1 `Pair` Var 0
-          n -> Var (n + 1)
-        (t', i) = assoc t
-     in (t', Assoc <> i)
-  Sigma x a b ->
-    let (b', i) = assoc b
-     in (Sigma x a b', sigmaCongR i)
-  t -> (t, mempty)
-
---------------------------------------------------------------------------------
-
-newtype Level = Level Int
-  deriving newtype (Eq, Ord, Num, Show)
-
-data Value
-  = VRigid Level Spine
-  | VFlex MetaVar Spine
-  | VU
-  | VPi Name Value (Value -> Value)
-  | VLam Name (Value -> Value)
-  | VSigma Name Value (Value -> Value)
-  | VPair Value Value
-
-data Spine
-  = SNil
-  | SApp Spine Value
-  | SFst Spine
-  | SSnd Spine
-
-pattern VVar :: Level -> Value
-pattern VVar x = VRigid x SNil
-
-pattern VMeta :: MetaVar -> Value
-pattern VMeta m = VFlex m SNil
-
-eval :: [Value] -> Term -> Value
-eval env = \case
-  Var (Index x) -> env !! x
-  Meta m -> VMeta m
-  U -> VU
-  Pi x a b -> VPi x (eval env a) \v -> eval (v : env) b
-  Lam x t -> VLam x \v -> eval (v : env) t
-  t :@ u -> vapp (eval env t) (eval env u)
-  Sigma x a b -> VSigma x (eval env a) \v -> eval (v : env) b
-  Pair t u -> VPair (eval env t) (eval env u)
-  Fst t -> vfst (eval env t)
-  Snd t -> vsnd (eval env t)
-
-vapp :: Value -> Value -> Value
-vapp = \cases
-  (VLam _ f) u -> f u
-  (VRigid x sp) u -> VRigid x (SApp sp u)
-  _ _ -> error "vapp: not a function"
-
-vfst :: Value -> Value
-vfst = \case
-  VPair t _ -> t
-  VRigid x sp -> VRigid x (SFst sp)
-  _ -> error "vfst: not a pair"
-
-vsnd :: Value -> Value
-vsnd = \case
-  VPair _ t -> t
-  VRigid x sp -> VRigid x (SSnd sp)
-  _ -> error "vfst: not a pair"
-
-quote :: Level -> Value -> Term
-quote l = \case
-  VRigid x sp -> quoteSpine l (Var $ coerce (l - x - 1)) sp
-  VFlex m sp -> quoteSpine l (Meta m) sp
-  VU -> U
-  VPi x a b -> Pi x (quote l a) (quote (l + 1) (b $ VVar l))
-  VLam x t -> Lam x (quote (l + 1) (t $ VVar l))
-  VSigma x a b -> Sigma x (quote l a) (quote (l + 1) (b $ VVar l))
-  VPair t u -> Pair (quote l t) (quote l u)
-
-quoteSpine :: Level -> Term -> Spine -> Term
-quoteSpine l hd = \case
-  SNil -> hd
-  SApp sp t -> quoteSpine l hd sp :@ quote l t
-  SFst t -> Fst $ quoteSpine l hd t
-  SSnd t -> Snd $ quoteSpine l hd t
-
-nf0 :: Term -> Term
-nf0 t = quote 0 (eval [] t)
+-- make top-level sigma types right-nested
+assoc :: Level -> Value -> (Term, Iso)
+assoc l = \case
+  VSigma x (VSigma y a b) c ->
+    let v = VSigma y a \u -> VSigma x (b u) \w -> c (VPair u w)
+        (t, i) = assoc l v
+     in (t, Assoc <> i)
+  VSigma x a b ->
+    let a' = quote l a
+        (b', i) = assoc (l + 1) (b $ VVar l)
+     in (Sigma x a' b', sigmaCongR i)
+  v -> (quote l v, mempty)
 
 --------------------------------------------------------------------------------
 
@@ -295,7 +291,6 @@ prettyTerm = go
   where
     go ns p = \case
       Var (Index i) -> showString (ns !! i)
-      Meta (MetaVar m) -> showChar '?' . shows m
       U -> showString "U"
       Pi "_" a b ->
         par p piP $ go ns sigmaP a . showString " → " . go ("_" : ns) piP b
