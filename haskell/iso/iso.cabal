@@ -14,6 +14,12 @@ common defaults
         OverloadedStrings
         BlockArguments
         LambdaCase
+        ViewPatterns
+        PatternSynonyms
+        DerivingStrategies
+        TemplateHaskell
+        OverloadedRecordDot
+        DataKinds
     ghc-options:
         -Wall
         -Wcompat
@@ -27,7 +33,4 @@ executable iso
     hs-source-dirs: app
     main-is: Main.hs
     build-depends:
-        base >=4.16,
-        multiset,
-        megaparsec,
-        containers
+        base >=4.16
