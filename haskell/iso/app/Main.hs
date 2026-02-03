@@ -194,32 +194,32 @@ sigmaCongR = \case
   t -> SigmaCongR t
 
 -- transport along an isomorphism
-transport :: Iso -> Value
-transport = \case
-  Refl -> VLam "x" id
-  Sym i -> transportInv i
-  Trans i j -> VLam "x" \x -> transport j @ (transport i @ x)
-  Assoc -> VLam "p" \p -> vfst (vfst p) `VPair` (vsnd (vfst p) `VPair` vsnd p)
-  Comm -> VLam "p" \p -> vsnd p `VPair` vfst p
-  Curry -> VLam "f" \f -> VLam "x" \x -> VLam "y" \y -> f @ VPair x y
-  PiCongL i -> VLam "f" \f -> VLam "x" \x -> f @ (transportInv i @ x)
-  PiCongR i -> VLam "f" \f -> VLam "x" \x -> transport i @ (f @ x)
-  SigmaCongL i -> VLam "p" \p -> (transport i @ vfst p) `VPair` vsnd p
-  SigmaCongR i -> VLam "p" \p -> vfst p `VPair` (transport i @ vsnd p)
+transport :: Iso -> Value -> Value
+transport = \cases
+  Refl v -> v
+  (Sym i) v -> transportInv i v
+  (Trans i j) v -> transport j (transport i v)
+  Assoc v -> vfst (vfst v) `VPair` (vsnd (vfst v) `VPair` vsnd v)
+  Comm v -> vsnd v `VPair` vfst v
+  Curry v -> VLam "x" \x -> VLam "y" \y -> v @ VPair x y
+  (PiCongL i) v -> VLam "x" \x -> v @ transportInv i x
+  (PiCongR i) v -> VLam "x" \x -> transport i (v @ x)
+  (SigmaCongL i) v -> transport i (vfst v) `VPair` vsnd v
+  (SigmaCongR i) v -> vfst v `VPair` transport i (vsnd v)
 
 -- transport back
-transportInv :: Iso -> Value
-transportInv = \case
-  Refl -> VLam "x" id
-  Sym i -> transport i
-  Trans i j -> VLam "x" \x -> transportInv i @ (transportInv j @ x)
-  Assoc -> VLam "p" \p -> (vfst p `VPair` vfst (vsnd p)) `VPair` vsnd (vsnd p)
-  Comm -> VLam "p" \p -> vsnd p `VPair` vfst p
-  Curry -> VLam "f" \f -> VLam "p" \p -> f @ vfst p @ vsnd p
-  PiCongL i -> VLam "f" \f -> VLam "x" \x -> f @ (transport i @ x)
-  PiCongR i -> VLam "f" \f -> VLam "x" \x -> transportInv i @ (f @ x)
-  SigmaCongL i -> VLam "p" \p -> (transportInv i @ vfst p) `VPair` vsnd p
-  SigmaCongR i -> VLam "p" \p -> vfst p `VPair` (transportInv i @ vsnd p)
+transportInv :: Iso -> Value -> Value
+transportInv = \cases
+  Refl v -> v
+  (Sym i) v -> transport i v
+  (Trans i j) v -> transportInv i (transportInv j v)
+  Assoc v -> (vfst v `VPair` vfst (vsnd v)) `VPair` vsnd (vsnd v)
+  Comm v -> vsnd v `VPair` vfst v
+  Curry v -> VLam "p" \p -> v @ vfst p @ vsnd p
+  (PiCongL i) v -> VLam "x" \x -> v @ (transport i x)
+  (PiCongR i) v -> VLam "x" \x -> transportInv i (v @ x)
+  (SigmaCongL i) v -> transportInv i (vfst v) `VPair` vsnd v
+  (SigmaCongR i) v -> vfst v `VPair` transportInv i (vsnd v)
 
 --------------------------------------------------------------------------------
 -- Type normalisation
@@ -228,16 +228,16 @@ normalise0 :: Term -> (Term, Iso)
 normalise0 t = normalise [] 0 (eval [] t)
 
 -- compute the normalised type and isomorphism to it
-normalise :: Env -> Level -> Value -> (Term, Iso)
+normalise :: [Value] -> Level -> Value -> (Term, Iso)
 normalise env l = \case
   VPi x a b ->
     let (a', ia) = normalise env l a
-        (b', ib) = normalise (VVar l : env) (l + 1) (b $ transportInv ia @ VVar l)
+        (b', ib) = normalise (VVar l : env) (l + 1) (b $ transportInv ia $ VVar l)
         (t, i) = curry l $ eval env (Pi x a' b')
      in (t, piCongL ia <> piCongR ib <> i)
   VSigma x a b ->
     let (a', ia) = normalise env l a
-        (b', ib) = normalise (VVar l : env) (l + 1) (b $ transportInv ia @ VVar l)
+        (b', ib) = normalise (VVar l : env) (l + 1) (b $ transportInv ia $ VVar l)
         (t, i) = assoc l $ eval env (Sigma x a' b')
      in (t, sigmaCongL ia <> sigmaCongR ib <> i)
   v -> (quote l v, mempty)
