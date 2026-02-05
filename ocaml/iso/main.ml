@@ -371,10 +371,21 @@ let pi_p = 2
 let abs_p = 1
 let pair_p = 0
 
-let rec freshen ns n =
-  match List.find ns ~f:(String.equal n) with
-  | Some _ -> freshen ns (String.append n "\'")
-  | None -> n
+let subscript_digits = [| "₀"; "₁"; "₂"; "₃"; "₄"; "₅"; "₆"; "₇"; "₈"; "₉" |]
+
+let int_to_subscript n =
+  String.concat_map (Int.to_string n) ~f:(fun c ->
+    subscript_digits.(Char.get_digit_exn c))
+;;
+
+let freshen ns =
+  let rec go i n =
+    let candidate = if i = 0 then n else n ^ int_to_subscript i in
+    match List.find ns ~f:(String.equal candidate) with
+    | Some _ -> go (i + 1) n
+    | None -> candidate
+  in
+  go 0
 ;;
 
 let format_term =
@@ -453,10 +464,13 @@ let ex3 =
 
 let () =
   List.iter [ ex1; ex2; ex3 ] ~f:(fun t ->
-    printf "----------------\n";
+    printf "----------------\n\n";
     printf "%t\n" (format_term [] 0 t);
     let t', i = normalise0 t in
     printf "  ↓ %t\n" (format_iso 0 i);
-    printf "%t\n" (format_term [] 0 t');
+    printf "%t\n\n" (format_term [] 0 t');
+    let i = transport_fun i in
+    printf "conversion function:\n";
+    printf "  %t\n\n" (format_term [] 0 @@ quote 0 i);
     clear_iso ())
 ;;
