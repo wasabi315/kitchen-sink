@@ -58,16 +58,35 @@ $$
 
 ```text
 (F : (U × U → U) → U) (G : U × U → U) → F G
+
   ↓ ΠL (ΠL Curry) · ΠR (ΠL Curry)
-(F : (U → U → U) → U) (G : U → U → U) → F (λ x x'. G x x')
+
+(F : (U → U → U) → U) (G : U → U → U) → F (λ x x₁. G x x₁)
+
+conversion function:
+  λ x x₁ x₂. x (λ x₃. x₁ (λ x₄ y. x₃ (x₄ , y))) (λ p. x₂ p.1 p.2)
+
+
 
 (F : U × U → U) (A : U) (B : U) → F (A , B)
+
   ↓ ΠL Curry
+
 (F : U → U → U) (A : U) (B : U) → F A B
 
+conversion function:
+  λ x x₁. x (λ p. x₁ p.1 p.2)
+
+
+
 (A : U) (B : A → U) (P : (x : A) × B x → U) (p : (x : A) × B x) (q : (y : A) × B y) → P p × P q
+
   ↓ ΠR (ΠR (ΠL Curry · ΠR (ΠR Curry · Curry)))
+
 (A : U) (B : A → U) (P : (x : A) → B x → U) (x : A) (p : B x) (y : A) (q : B y) → P x p × P y q
+
+conversion function:
+  λ x x₁ x₂ x₃ x₄ y x₅ y₁. x x₁ x₂ (λ p. x₃ p.1 p.2) (x₄ , y) (x₅ , y₁)
 ```
 
 ## Reference

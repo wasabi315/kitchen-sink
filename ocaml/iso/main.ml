@@ -465,9 +465,9 @@ let ex3 =
 let () =
   List.iter [ ex1; ex2; ex3 ] ~f:(fun t ->
     printf "----------------\n\n";
-    printf "%t\n" (format_term [] 0 t);
+    printf "%t\n\n" (format_term [] 0 t);
     let t', i = normalise0 t in
-    printf "  ↓ %t\n" (format_iso 0 i);
+    printf "  ↓ %t\n\n" (format_iso 0 i);
     printf "%t\n\n" (format_term [] 0 t');
     let i = transport_fun i in
     printf "conversion function:\n";
