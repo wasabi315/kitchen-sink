@@ -9,11 +9,12 @@ import Prelude hiding (curry)
 
 main :: IO ()
 main = for_ [ex1, ex2, ex3] \t -> do
-  putStrLn "----------------"
-  putStrLn $ prettyTerm [] 0 t ""
+  putStrLn $ prettyTerm [] 0 t "\n"
   let (t', i) = normalise0 t
-  putStrLn $ prettyIso 0 i ""
-  putStrLn $ prettyTerm [] 0 t' ""
+  putStrLn $ "  ↓ " ++ prettyIso 0 i "\n"
+  putStrLn $ prettyTerm [] 0 t' "\n"
+  putStrLn "conversion function:"
+  putStrLn $ "  " ++ prettyTerm [] 0 (quote 0 (VLam "x" $ transport i)) "\n\n"
 
 ex1 :: Term
 ex1 = Pi "F" (Pi "_" (Pi "_" (Sigma "_" U U) U) U) $ Pi "G" (Pi "_" (Sigma "_" U U) U) $ Var 1 :@ Var 0
@@ -271,8 +272,27 @@ pairP = 0
 
 freshen :: [Name] -> Name -> Name
 freshen ns n
-  | n `elem` ns = freshen ns (n ++ "\'")
+  | n `elem` ns = go 0
   | otherwise = n
+  where
+    go (i :: Int)
+      | n' `notElem` ns = n'
+      | otherwise = go (i + 1)
+      where
+        n' = n ++ map sub (show i)
+
+    sub = \case
+      '0' -> '₀'
+      '1' -> '₁'
+      '2' -> '₂'
+      '3' -> '₃'
+      '4' -> '₄'
+      '5' -> '₅'
+      '6' -> '₆'
+      '7' -> '₇'
+      '8' -> '₈'
+      '9' -> '₉'
+      _ -> error "impossible"
 
 prettyTerm :: [Name] -> Int -> Term -> ShowS
 prettyTerm = go
