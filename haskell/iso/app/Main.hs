@@ -216,7 +216,7 @@ transportInv = \cases
   Assoc v -> (vfst v `VPair` vfst (vsnd v)) `VPair` vsnd (vsnd v)
   Comm v -> vsnd v `VPair` vfst v
   Curry v -> VLam "p" \p -> v @ vfst p @ vsnd p
-  (PiCongL i) v -> VLam "x" \x -> v @ (transport i x)
+  (PiCongL i) v -> VLam "x" \x -> v @ transport i x
   (PiCongR i) v -> VLam "x" \x -> transportInv i (v @ x)
   (SigmaCongL i) v -> transportInv i (vfst v) `VPair` vsnd v
   (SigmaCongR i) v -> vfst v `VPair` transportInv i (vsnd v)
@@ -225,48 +225,36 @@ transportInv = \cases
 -- Type normalisation
 
 normalise0 :: Term -> (Term, Iso)
-normalise0 t = normalise [] 0 (eval [] t)
+normalise0 t = normalise 0 (eval [] t)
 
 -- compute the normalised type and isomorphism to it
-normalise :: [Value] -> Level -> Value -> (Term, Iso)
-normalise env l = \case
-  VPi x a b ->
-    let (a', ia) = normalise env l a
-        (b', ib) = normalise (VVar l : env) (l + 1) (b $ transportInv ia $ VVar l)
-        (t, i) = curry l $ eval env (Pi x a' b')
-     in (t, piCongL ia <> piCongR ib <> i)
-  VSigma x a b ->
-    let (a', ia) = normalise env l a
-        (b', ib) = normalise (VVar l : env) (l + 1) (b $ transportInv ia $ VVar l)
-        (t, i) = assoc l $ eval env (Sigma x a' b')
-     in (t, sigmaCongL ia <> sigmaCongR ib <> i)
+normalise :: Level -> Value -> (Term, Iso)
+normalise l = \case
+  VPi x a b -> normalisePi l x a b
+  VSigma x a b -> normaliseSigma l x a b
   v -> (quote l v, mempty)
 
--- curryify top-level pi types
-curry :: Level -> Value -> (Term, Iso)
-curry l = \case
-  VPi x (VSigma y a b) c ->
-    let v = VPi y a \u -> VPi x (b u) \w -> c (VPair u w)
-        (t, i) = curry l v
+-- currying
+normalisePi :: Level -> Name -> Value -> (Value -> Value) -> (Term, Iso)
+normalisePi l x = \cases
+  (VSigma y a b) c ->
+    let (t, i) = normalisePi l y a \u -> VPi x (b u) \v -> c (VPair u v)
      in (t, Curry <> i)
-  VPi x a b ->
-    let a' = quote l a
-        (b', i) = curry (l + 1) (b $ VVar l)
-     in (Pi x a' b', piCongR i)
-  v -> (quote l v, mempty)
+  a b ->
+    let (ta, ia) = normalise l a
+        (tb, ib) = normalise (l + 1) (b (transportInv ia (VVar l)))
+     in (Pi x ta tb, piCongL ia <> piCongR ib)
 
--- make top-level sigma types right-nested
-assoc :: Level -> Value -> (Term, Iso)
-assoc l = \case
-  VSigma x (VSigma y a b) c ->
-    let v = VSigma y a \u -> VSigma x (b u) \w -> c (VPair u w)
-        (t, i) = assoc l v
+-- make sigmas more right-nested
+normaliseSigma :: Level -> Name -> Value -> (Value -> Value) -> (Term, Iso)
+normaliseSigma l x = \cases
+  (VSigma y a b) c ->
+    let (t, i) = normaliseSigma l y a \u -> VSigma x (b u) \v -> c (VPair u v)
      in (t, Assoc <> i)
-  VSigma x a b ->
-    let a' = quote l a
-        (b', i) = assoc (l + 1) (b $ VVar l)
-     in (Sigma x a' b', sigmaCongR i)
-  v -> (quote l v, mempty)
+  a b ->
+    let (ta, ia) = normalise l a
+        (tb, ib) = normalise (l + 1) (b (transportInv ia (VVar l)))
+     in (Sigma x ta tb, sigmaCongL ia <> sigmaCongR ib)
 
 --------------------------------------------------------------------------------
 
