@@ -3,6 +3,7 @@
 
 module Main where
 
+import Control.Monad
 import Data.Coerce
 import Data.Foldable
 import Prelude hiding (curry)
@@ -174,25 +175,31 @@ instance Semigroup Iso where
 instance Monoid Iso where
   mempty = Refl
 
+sym :: Iso -> Iso
+sym = \case
+  Refl -> Refl
+  Sym i -> i
+  i -> Sym i
+
 piCongL :: Iso -> Iso
 piCongL = \case
   Refl -> Refl
-  t -> PiCongL t
+  i -> PiCongL i
 
 piCongR :: Iso -> Iso
 piCongR = \case
   Refl -> Refl
-  t -> PiCongR t
+  i -> PiCongR i
 
 sigmaCongL :: Iso -> Iso
 sigmaCongL = \case
   Refl -> Refl
-  t -> SigmaCongL t
+  i -> SigmaCongL i
 
 sigmaCongR :: Iso -> Iso
 sigmaCongR = \case
   Refl -> Refl
-  t -> SigmaCongR t
+  i -> SigmaCongR i
 
 -- transport along an isomorphism
 transport :: Iso -> Value -> Value
@@ -256,6 +263,122 @@ normaliseSigma l x = \cases
     let (ta, ia) = normalise l a
         (tb, ib) = normalise (l + 1) (b (transportInv ia (VVar l)))
      in (Sigma x ta tb, sigmaCongL ia <> sigmaCongR ib)
+
+--------------------------------------------------------------------------------
+-- Conversion modulo isomorphism
+-- TOOD: commutativity
+
+convIso0 :: Term -> Term -> Maybe Iso
+convIso0 t u = fmap (\(i, j) -> i <> sym j) $ convIso 0 (eval [] t) (eval [] u)
+
+-- convIso 0 (eval [] t) (eval [] u)
+
+convIso :: Level -> Value -> Value -> Maybe (Iso, Iso)
+convIso l = \cases
+  -- pi is only convertible with pi under the isomorphisms we consider here
+  (VPi _ a b) (VPi _ a' b') -> convPi l a b a' b'
+  -- likewise
+  (VSigma _ a b) (VSigma _ a' b') -> convSigma l a b a' b'
+  t u -> (Refl, Refl) <$ guard (conv l t u)
+
+convPi :: Level -> Value -> (Value -> Value) -> Value -> (Value -> Value) -> Maybe (Iso, Iso)
+convPi l = \cases
+  (VSigma x a b) c (VSigma x' a' b') c' -> do
+    (i, i') <-
+      convPi
+        l
+        a
+        (\u -> VPi x (b u) \v -> c (VPair u v))
+        a'
+        (\u' -> VPi x' (b' u') \v' -> c' (VPair u' v'))
+    Just (Curry <> i, Curry <> i')
+  (VSigma x a b) c a' b' -> do
+    (i, i') <-
+      convPi
+        l
+        a
+        (\u -> VPi x (b u) \v -> c (VPair u v))
+        a'
+        b'
+    Just (Curry <> i, i')
+  a b (VSigma x' a' b') c' -> do
+    (i, i') <-
+      convPi
+        l
+        a
+        b
+        a'
+        (\u' -> VPi x' (b' u') \v' -> c' (VPair u' v'))
+    Just (i, Curry <> i')
+  a b a' b' -> do
+    (i, i') <- convIso l a a'
+    (j, j') <- convIso (l + 1) (b (transportInv i (VVar l))) (b' (transportInv i' (VVar l)))
+    Just (piCongL i <> piCongR j, piCongL i' <> piCongR j')
+
+convSigma :: Level -> Value -> (Value -> Value) -> Value -> (Value -> Value) -> Maybe (Iso, Iso)
+convSigma l = \cases
+  (VSigma x a b) c (VSigma x' a' b') c' -> do
+    (i, i') <-
+      convSigma
+        l
+        a
+        (\u -> VSigma x (b u) \v -> c (VPair u v))
+        a'
+        (\u' -> VSigma x' (b' u') \v' -> c' (VPair u' v'))
+    Just (Assoc <> i, Assoc <> i')
+  (VSigma x a b) c a' b' -> do
+    (i, i') <-
+      convSigma
+        l
+        a
+        (\u -> VSigma x (b u) \v -> c (VPair u v))
+        a'
+        b'
+    Just (Assoc <> i, i')
+  a b (VSigma x' a' b') c' -> do
+    (i, i') <-
+      convSigma
+        l
+        a
+        b
+        a'
+        (\u' -> VSigma x' (b' u') \v' -> c' (VPair u' v'))
+    Just (i, Assoc <> i')
+  a b a' b' -> do
+    (i, i') <- convIso l a a'
+    (j, j') <- convIso (l + 1) (b (transportInv i (VVar l))) (b' (transportInv i' (VVar l)))
+    Just (sigmaCongL i <> sigmaCongR j, sigmaCongL i' <> sigmaCongR j')
+
+conv :: Level -> Value -> Value -> Bool
+conv l = \cases
+  (VRigid x sp) (VRigid x' sp') ->
+    x == x' && convSpine l sp sp'
+  VU VU -> True
+  (VPi _ a b) (VPi _ a' b') ->
+    conv l a a' && conv (l + 1) (b $ VVar l) (b' $ VVar l)
+  (VLam _ t) (VLam _ t') ->
+    conv (l + 1) (t $ VVar l) (t' $ VVar l)
+  (VLam _ t) u ->
+    conv (l + 1) (t $ VVar l) (u @ VVar l)
+  t (VLam _ u) ->
+    conv (l + 1) (t @ VVar l) (u $ VVar l)
+  (VSigma _ a b) (VSigma _ a' b') ->
+    conv l a a' && conv (l + 1) (b $ VVar l) (b' $ VVar l)
+  (VPair t u) (VPair t' u') ->
+    conv l t t' && conv l u u'
+  (VPair t u) v ->
+    conv l t (vfst v) && conv l u (vsnd v)
+  t (VPair u v) ->
+    conv l (vfst t) u && conv l (vsnd t) v
+  _ _ -> False
+
+convSpine :: Level -> Spine -> Spine -> Bool
+convSpine l = \cases
+  SNil SNil -> True
+  (SApp sp t) (SApp sp' t') -> convSpine l sp sp' && conv l t t'
+  (SFst sp) (SFst sp') -> convSpine l sp sp'
+  (SSnd sp) (SSnd sp') -> convSpine l sp sp'
+  _ _ -> False
 
 --------------------------------------------------------------------------------
 
@@ -337,10 +460,7 @@ prettyTerm = go
 prettyIso :: Int -> Iso -> ShowS
 prettyIso p = \case
   Refl -> showString "refl"
-  Sym (Sym i) -> prettyIso p i
-  Sym i -> par p 11 $ prettyIso 12 i . showString "⁻¹"
-  Trans Refl i -> prettyIso p i
-  Trans i Refl -> prettyIso p i
+  Sym i -> par p 11 $ prettyIso 12 i . showString " ⁻¹"
   Trans i j -> par p 9 $ prettyIso 10 i . showString " · " . prettyIso 10 j
   Assoc -> showString "Assoc"
   Comm -> showString "Comm"
