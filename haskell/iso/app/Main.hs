@@ -361,7 +361,7 @@ pickDomain topL a b = pure (a, b, Refl) <|> go topL b
               guard $ not (depend topL l c1)
               pure
                 ( c1,
-                  (\vc1 -> VPi "x" a (\va -> deletePi (l - topL) vc1 (b va))),
+                  (\vc1 -> deletePi (l - topL + 1) vc1 (VPi "x" a b)),
                   swaps (l - topL)
                 ),
             go (l + 1) c2
@@ -434,7 +434,7 @@ pickProjection topL a b = pure (a, b, Refl) <|> go topL b
               guard $ not (depend topL l c1)
               pure
                 ( c1,
-                  (\vc1 -> VSigma "x" a (\va -> deleteSigma (l - topL) vc1 (b va))),
+                  (\vc1 -> deleteSigma (l - topL + 1) vc1 (VSigma "x" a b)),
                   comms (l - topL)
                 ),
             go (l + 1) c2
@@ -443,7 +443,7 @@ pickProjection topL a b = pure (a, b, Refl) <|> go topL b
         guard $ not (depend topL l c')
         pure
           ( c',
-            (\vc1 -> VSigma "x" a (\va -> deleteSigma (l - topL) vc1 (b va))),
+            (\vc' -> deleteSigma (l - topL + 1) vc' (VSigma "a" a b)),
             comms (l - topL)
           )
 
