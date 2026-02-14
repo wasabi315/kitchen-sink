@@ -4,6 +4,7 @@ import Control.Applicative
 import Control.Monad
 import Data.Coerce
 import Data.Foldable
+import Data.String
 import Prelude hiding ((*))
 
 infixr 5 -->
@@ -45,7 +46,7 @@ foldty1 = quote 0 $
     VPi "B" VU \b ->
       (a --> b --> b)
         --> b
-        --> VTop "List" (SApp SNil a)
+        --> ("List" $$ a)
         --> b
 
 foldty2 :: Term
@@ -53,9 +54,26 @@ foldty2 = quote 0 $
   VPi "A" VU \a ->
     VPi "B" VU \b ->
       (b * a --> b)
-        --> VTop "List" (SApp SNil a)
+        --> ("List" $$ a)
         --> b
         --> b
+
+listind1 :: Term
+listind1 = quote 0 $
+  VPi "A" VU \a ->
+    VPi "P" (VTop "List" (SApp SNil a) --> VU) \p ->
+      (VPi "x" a \x -> VPi "xs" ("List" $$ a) \xs -> (p $$ xs) --> (p $$ ("cons" $$ a $$ x $$ xs)))
+        --> (p $$ ("nil" $$ a))
+        --> VPi "xs" ("List" $$ a) \xs -> p $$ xs
+
+listind2 :: Term
+listind2 = quote 0 $
+  VPi "A" VU \a ->
+    VPi "P" (VTop "List" (SApp SNil a) --> VU) \p ->
+      (VPi "t" (VSigma "xs" ("List" $$ a) \xs -> p $$ xs) \t -> VPi "x" a \x -> (p $$ ("cons" $$ a $$ x $$ vfst t)))
+        --> VPi "xs" ("List" $$ a) \xs ->
+          (p $$ ("nil" $$ a))
+            --> (p $$ xs)
 
 --------------------------------------------------------------------------------
 -- Terms
@@ -107,6 +125,9 @@ a --> b = VPi "_" a \_ -> b
 
 (*) :: Value -> Value -> Value
 a * b = VSigma "_" a \_ -> b
+
+instance IsString Value where
+  fromString s = VTop s SNil
 
 type Env = [Value]
 
@@ -182,12 +203,19 @@ data Iso
   | --  ---------------
     --   A * B ~ B * A
     Comm
+  | -- ---------------------------------------------
+    --  (x : A) * (y : B) * C ~ (y : B) * (x : A) * C
+    --
+    -- derivable from comm and assoc
+    SigmaSwap
   | --  -------------------------------------------------------------------
     --   (x : (y : A) * B[y]) -> C[x] ~ (y : A) -> (x : B[y]) -> C[(x, y)]
     Curry
   | -- ---------------------------------------------
     --  (x : A) (y : B) -> C ~ (y : B) (x : A) -> C
-    Swap
+    --
+    -- derivable from comm and curry
+    PiSwap
   | --                     i : A ~ A'
     --  ---------------------------------------------------
     --   (x : A) -> B[x] ~ (x : A') -> B[transportInv i x]
@@ -248,8 +276,9 @@ transport = \cases
   (Trans i j) v -> transport j (transport i v)
   Assoc v -> vfst (vfst v) `VPair` (vsnd (vfst v) `VPair` vsnd v)
   Comm v -> vsnd v `VPair` vfst v
+  SigmaSwap v -> vfst (vsnd v) `VPair` (vfst v `VPair` vsnd (vsnd v))
   Curry v -> VLam "x" \x -> VLam "y" \y -> v $$ VPair x y
-  Swap v -> VLam "y" \y -> VLam "x" \x -> v $$ x $$ y
+  PiSwap v -> VLam "y" \y -> VLam "x" \x -> v $$ x $$ y
   (PiCongL i) v -> VLam "x" \x -> v $$ transportInv i x
   (PiCongR i) v -> VLam "x" \x -> transport i (v $$ x)
   (SigmaCongL i) v -> transport i (vfst v) `VPair` vsnd v
@@ -263,8 +292,9 @@ transportInv = \cases
   (Trans i j) v -> transportInv i (transportInv j v)
   Assoc v -> (vfst v `VPair` vfst (vsnd v)) `VPair` vsnd (vsnd v)
   Comm v -> vsnd v `VPair` vfst v
+  SigmaSwap v -> vfst (vsnd v) `VPair` (vfst v `VPair` vsnd (vsnd v))
   Curry v -> VLam "p" \p -> v $$ vfst p $$ vsnd p
-  Swap v -> VLam "x" \x -> VLam "y" \y -> v $$ y $$ x
+  PiSwap v -> VLam "x" \x -> VLam "y" \y -> v $$ y $$ x
   (PiCongL i) v -> VLam "x" \x -> v $$ transport i x
   (PiCongR i) v -> VLam "x" \x -> transportInv i (v $$ x)
   (SigmaCongL i) v -> transportInv i (vfst v) `VPair` vsnd v
@@ -323,8 +353,8 @@ convIso l = \cases
   _ (VSigma {}) -> empty
   t u -> (Refl, Refl) <$ guard (conv l t u)
 
-depend :: Level -> Level -> Value -> Bool
-depend from to = go to
+dependsOnLevelsBetween :: Level -> Level -> Value -> Bool
+dependsOnLevelsBetween from to = go to
   where
     go l = \case
       VRigid x sp -> (from <= x && x <= to) || goSpine l sp
@@ -343,41 +373,35 @@ depend from to = go to
       SFst sp -> goSpine l sp
       SSnd sp -> goSpine l sp
 
+instantiatePiAt :: Int -> Value -> Value -> Value
+instantiatePiAt = \cases
+  i _ _ | i < 0 -> error "instantiatePiAt: negative index"
+  0 v (VPi _ _ b) -> b v
+  i v (VPi x a b) -> VPi x a (instantiatePiAt (i - 1) v . b)
+  _ _ _ -> error "instantiatePiAt: not a pi"
+
 pickDomain ::
   forall m.
   (MonadPlus m) =>
   Level ->
+  Name ->
   Value ->
   (Value -> Value) ->
-  m (Value, Value -> Value, Iso)
-pickDomain topL a b = pure (a, b, Refl) <|> go topL b
+  m (Name, Value, Value -> Value, Iso)
+pickDomain topL x a b = pure (x, a, b, Refl) <|> go topL b
   where
-    -- matching under binders :(
-    go :: Level -> (Value -> Value) -> m (Value, Value -> Value, Iso)
+    go :: Level -> (Value -> Value) -> m (Name, Value, Value -> Value, Iso)
     go l c = case c (VVar l) of
-      VPi _ c1 c2 ->
-        asum
-          [ do
-              guard $ not (depend topL l c1)
-              pure
-                ( c1,
-                  (\vc1 -> deletePi (l - topL + 1) vc1 (VPi "x" a b)),
-                  swaps (l - topL)
-                ),
-            go (l + 1) c2
-          ]
+      VPi y c1 c2 -> (<|> go (l + 1) c2) do
+        guard $ not (dependsOnLevelsBetween topL l c1)
+        let rest vc1 = VPi x a \v ->
+              instantiatePiAt (coerce $ l - topL) vc1 (b v)
+        pure (y, c1, rest, swaps (l - topL))
       _ -> empty
 
-    deletePi :: Level -> Value -> Value -> Value
-    deletePi = \cases
-      0 vc1 (VPi _ _ c2) -> c2 vc1
-      i vc1 (VPi y d e) -> VPi y d (deletePi (i - 1) vc1 . e)
-      _ _ _ -> error "not a pi"
-
-    swaps :: Level -> Iso
     swaps = \case
-      0 -> Swap
-      i -> piCongR (swaps (i - 1)) <> Swap
+      0 -> PiSwap
+      n -> piCongR (swaps (n - 1)) <> PiSwap
 
 convPi :: (MonadPlus m) => Level -> Value -> (Value -> Value) -> Value -> (Value -> Value) -> m (Iso, Iso)
 convPi l = \cases
@@ -411,55 +435,54 @@ convPi l = \cases
     pure (i, Curry <> i')
   -- Then permute domain
   a b a' b' -> do
-    (a'', b'', i) <- pickDomain l a' b'
+    (_, a'', b'', i) <- pickDomain l "x" a' b'
     (ia, ia') <- convIso l a a''
-    (ib, ib') <- convIso (l + 1) (b (transportInv ia (VVar l))) (b'' (transportInv ia' (VVar l)))
+    (ib, ib') <-
+      convIso
+        (l + 1)
+        (b (transportInv ia (VVar l)))
+        (b'' (transportInv ia' (VVar l)))
     pure (piCongL ia <> piCongR ib, i <> piCongL ia' <> piCongR ib')
+
+instantiateSigmaAt :: Int -> Value -> Value -> Value
+instantiateSigmaAt = \cases
+  i _ _ | i < 0 -> error "instantiateSigmaAt: negative index"
+  0 v (VSigma _ _ b) -> b v
+  i v (VSigma x a b) -> VSigma x a (instantiateSigmaAt (i - 1) v . b)
+  _ _ _ -> error "instantiateSigmaAt: not a sigma"
+
+dropLastProjection :: Level -> Value -> Value
+dropLastProjection l = \case
+  VSigma x a b -> case b (VVar l) of
+    VSigma {} -> VSigma x a (dropLastProjection (l + 1) . b)
+    _ -> a
+  _ -> error "dropLastProjection: not a sigma"
 
 pickProjection ::
   forall m.
   (MonadPlus m) =>
   Level ->
+  Name ->
   Value ->
   (Value -> Value) ->
-  m (Value, Value -> Value, Iso)
-pickProjection topL a b = pure (a, b, Refl) <|> go topL b
+  m (Name, Value, Value -> Value, Iso)
+pickProjection topL x a b = pure (x, a, b, Refl) <|> go topL b
   where
-    -- matching under binders :(
-    go :: Level -> (Value -> Value) -> m (Value, Value -> Value, Iso)
+    go :: Level -> (Value -> Value) -> m (Name, Value, Value -> Value, Iso)
     go l c = case c (VVar l) of
-      VSigma _ c1 c2 ->
-        asum
-          [ do
-              guard $ not (depend topL l c1)
-              pure
-                ( c1,
-                  (\vc1 -> deleteSigma (l - topL + 1) vc1 (VSigma "x" a b)),
-                  comms (l - topL)
-                ),
-            go (l + 1) c2
-          ]
+      VSigma y c1 c2 -> (<|> go (l + 1) c2) do
+        guard $ not (dependsOnLevelsBetween topL l c1)
+        let rest vc1 = VSigma x a \v ->
+              instantiateSigmaAt (coerce $ l - topL) vc1 (b v)
+        pure (y, c1, rest, swaps SigmaSwap (l - topL))
       c' -> do
-        guard $ not (depend topL l c')
-        pure
-          ( c',
-            (\vc' -> deleteSigma (l - topL + 1) vc' (VSigma "a" a b)),
-            comms (l - topL)
-          )
+        guard $ not (dependsOnLevelsBetween topL l c')
+        let rest _ = dropLastProjection l (VSigma x a b)
+        pure ("x", c', rest, swaps Comm (l - topL))
 
-    deleteSigma :: Level -> Value -> Value -> Value
-    deleteSigma = \cases
-      0 vc1 (VSigma _ _ c2) -> c2 vc1
-      1 vc1 (VSigma y d e) -> case e (VVar (-1)) of
-        VSigma {} -> VSigma y d (deleteSigma 0 vc1 . e)
-        _ -> d
-      i vc1 (VSigma y d e) -> VSigma y d (deleteSigma (i - 1) vc1 . e)
-      _ _ _ -> error "not a sigma"
-
-    comms :: Level -> Iso
-    comms = \case
-      0 -> Comm
-      i -> sigmaCongR (comms (i - 1)) <> Comm
+    swaps i = \case
+      0 -> i
+      n -> sigmaCongR (swaps i (n - 1)) <> SigmaSwap
 
 convSigma :: (MonadPlus m) => Level -> Value -> (Value -> Value) -> Value -> (Value -> Value) -> m (Iso, Iso)
 convSigma l = \cases
@@ -493,9 +516,13 @@ convSigma l = \cases
     pure (i, Assoc <> i')
   -- Then permute projections
   a b a' b' -> do
-    (a'', b'', i) <- pickProjection l a' b'
+    (_, a'', b'', i) <- pickProjection l "x" a' b'
     (ia, ia') <- convIso l a a''
-    (ib, ib') <- convIso (l + 1) (b (transportInv ia (VVar l))) (b'' (transportInv ia' (VVar l)))
+    (ib, ib') <-
+      convIso
+        (l + 1)
+        (b (transportInv ia (VVar l)))
+        (b'' (transportInv ia' (VVar l)))
     pure (sigmaCongL ia <> sigmaCongR ib, i <> sigmaCongL ia' <> sigmaCongR ib')
 
 conv :: Level -> Value -> Value -> Bool
@@ -530,6 +557,40 @@ convSpine l = \cases
   (SFst sp) (SFst sp') -> convSpine l sp sp'
   (SSnd sp) (SSnd sp') -> convSpine l sp sp'
   _ _ -> False
+
+--------------------------------------------------------------------------------
+-- Type normalisation + Permutation
+
+normalisePermute0 :: (MonadPlus m) => Term -> m (Term, Iso)
+normalisePermute0 t = normalisePermute 0 (eval [] t)
+
+normalisePermute :: (MonadPlus m) => Level -> Value -> m (Term, Iso)
+normalisePermute l = \case
+  VPi x a b -> normalisePermutePi l x a b
+  VSigma x a b -> normalisePermuteSigma l x a b
+  v -> pure (quote l v, mempty)
+
+normalisePermutePi :: (MonadPlus m) => Level -> Name -> Value -> (Value -> Value) -> m (Term, Iso)
+normalisePermutePi l x = \cases
+  (VSigma y a b) c -> do
+    (t, i) <- normalisePermutePi l y a \u -> VPi x (b u) \v -> c (VPair u v)
+    pure (t, Curry <> i)
+  a b -> do
+    (y, a', b', i) <- pickDomain l x a b
+    (ta, ia) <- normalisePermute l a'
+    (tb, ib) <- normalisePermute (l + 1) (b' (transportInv ia (VVar l)))
+    pure (Pi y ta tb, i <> piCongL ia <> piCongR ib)
+
+normalisePermuteSigma :: (MonadPlus m) => Level -> Name -> Value -> (Value -> Value) -> m (Term, Iso)
+normalisePermuteSigma l x = \cases
+  (VSigma y a b) c -> do
+    (t, i) <- normalisePermuteSigma l y a \u -> VSigma x (b u) \v -> c (VPair u v)
+    pure (t, Assoc <> i)
+  a b -> do
+    (y, a', b', i) <- pickProjection l x a b
+    (ta, ia) <- normalisePermute l a'
+    (tb, ib) <- normalisePermute (l + 1) (b' (transportInv ia (VVar l)))
+    pure (Sigma y ta tb, i <> sigmaCongL ia <> sigmaCongR ib)
 
 --------------------------------------------------------------------------------
 
@@ -616,8 +677,9 @@ prettyIso p = \case
   Trans i j -> par p 9 $ prettyIso 10 i . showString " · " . prettyIso 10 j
   Assoc -> showString "Assoc"
   Comm -> showString "Comm"
+  SigmaSwap -> showString "ΣSwap"
   Curry -> showString "Curry"
-  Swap -> showString "Swap"
+  PiSwap -> showString "ΠSwap"
   PiCongL i -> par p 10 $ showString "ΠL " . prettyIso 11 i
   PiCongR i -> par p 10 $ showString "ΠR " . prettyIso 11 i
   SigmaCongL i -> par p 10 $ showString "ΣL " . prettyIso 11 i
