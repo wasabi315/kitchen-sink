@@ -33,4 +33,5 @@ executable iso
     hs-source-dirs: app
     main-is: Main.hs
     build-depends:
-        base >=4.16
+        base >=4.16,
+        containers
