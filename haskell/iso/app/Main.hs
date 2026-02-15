@@ -89,8 +89,8 @@ listind2 = quote 0 $
 --------------------------------------------------------------------------------
 -- Util
 
-foldMapA :: (Foldable t, Alternative f) => (a -> f b) -> t a -> f b
-foldMapA f = getAlt . foldMap (coerce f)
+forAlt :: (Foldable t, Alternative f) => t a -> (a -> f b) -> f b
+forAlt xs f = getAlt $ foldMap (coerce f) xs
 
 --------------------------------------------------------------------------------
 -- Terms
@@ -419,7 +419,14 @@ pickDomain l x a b = (x, a, b, Refl) : go l b
       0 -> PiSwap
       n -> piCongR (swaps (n - 1)) <> PiSwap
 
-convPi :: (MonadPlus m) => Level -> Value -> (Value -> Value) -> Value -> (Value -> Value) -> m (Iso, Iso)
+convPi ::
+  (MonadPlus m) =>
+  Level ->
+  Value ->
+  (Value -> Value) ->
+  Value ->
+  (Value -> Value) ->
+  m (Iso, Iso)
 convPi l = \cases
   -- Curry first
   (VSigma x a b) c (VSigma x' a' b') c' -> do
@@ -451,7 +458,7 @@ convPi l = \cases
     pure (i, Curry <> i')
   -- Then try different domain orders
   a b a' b' ->
-    flip foldMapA (pickDomain l "x" a' b') \(_, a'', b'', s) -> do
+    forAlt (pickDomain l "x" a' b') \(_, a'', b'', s) -> do
       (ia, ia') <- convIso l a a''
       (ib, ib') <-
         convIso
@@ -501,7 +508,14 @@ pickProjection l x a b = (x, a, b, Refl) : go l b
       0 -> i
       n -> sigmaCongR (swaps i (n - 1)) <> SigmaSwap
 
-convSigma :: (MonadPlus m) => Level -> Value -> (Value -> Value) -> Value -> (Value -> Value) -> m (Iso, Iso)
+convSigma ::
+  (MonadPlus m) =>
+  Level ->
+  Value ->
+  (Value -> Value) ->
+  Value ->
+  (Value -> Value) ->
+  m (Iso, Iso)
 convSigma l = \cases
   -- Assoc first
   (VSigma x a b) c (VSigma x' a' b') c' -> do
@@ -533,7 +547,7 @@ convSigma l = \cases
     pure (i, Assoc <> i')
   -- Then try different projection orders
   a b a' b' ->
-    flip foldMapA (pickProjection l "x" a' b') \(_, a'', b'', s) -> do
+    forAlt (pickProjection l "x" a' b') \(_, a'', b'', s) -> do
       (ia, ia') <- convIso l a a''
       (ib, ib') <-
         convIso
@@ -589,23 +603,25 @@ normalisePermute l = \case
   VSigma x a b -> normalisePermuteSigma l x a b
   v -> pure (quote l v, mempty)
 
-normalisePermutePi :: (MonadPlus m) => Level -> Name -> Value -> (Value -> Value) -> m (Term, Iso)
+normalisePermutePi ::
+  (MonadPlus m) => Level -> Name -> Value -> (Value -> Value) -> m (Term, Iso)
 normalisePermutePi l x = \cases
   (VSigma y a b) c -> do
     (t, i) <- normalisePermutePi l y a \u -> VPi x (b u) \v -> c (VPair u v)
     pure (t, Curry <> i)
-  a b -> flip foldMapA (pickDomain l x a b) \(y, a', b', s) -> do
+  a b -> forAlt (pickDomain l x a b) \(y, a', b', s) -> do
     (ta, ia) <- normalisePermute l a'
     (tb, ib) <- normalisePermute (l + 1) (b' (transportInv ia (VVar l)))
     let i = s <> piCongL ia <> piCongR ib
     pure (Pi y ta tb, i)
 
-normalisePermuteSigma :: (MonadPlus m) => Level -> Name -> Value -> (Value -> Value) -> m (Term, Iso)
+normalisePermuteSigma ::
+  (MonadPlus m) => Level -> Name -> Value -> (Value -> Value) -> m (Term, Iso)
 normalisePermuteSigma l x = \cases
   (VSigma y a b) c -> do
     (t, i) <- normalisePermuteSigma l y a \u -> VSigma x (b u) \v -> c (VPair u v)
     pure (t, Assoc <> i)
-  a b -> flip foldMapA (pickProjection l x a b) \(y, a', b', s) -> do
+  a b -> forAlt (pickProjection l x a b) \(y, a', b', s) -> do
     (ta, ia) <- normalisePermute l a'
     (tb, ib) <- normalisePermute (l + 1) (b' (transportInv ia (VVar l)))
     let i = s <> sigmaCongL ia <> sigmaCongR ib
