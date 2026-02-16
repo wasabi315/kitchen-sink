@@ -1,10 +1,7 @@
 module Main where
 
-import Control.Applicative
-import Control.Monad
 import Data.Coerce
 import Data.Foldable
-import Data.Monoid
 import Data.String
 
 infixr 5 -->
@@ -85,12 +82,6 @@ listind2 = quote 0 $
         --> VPi "xs" ("List" $$ a) \xs ->
           (p $$ ("nil" $$ a))
             --> (p $$ xs)
-
---------------------------------------------------------------------------------
--- Util
-
-forAlt :: (Foldable t, Alternative f) => t a -> (a -> f b) -> f b
-forAlt xs f = getAlt $ foldMap (coerce f) xs
 
 --------------------------------------------------------------------------------
 -- Terms
@@ -355,20 +346,20 @@ normaliseSigma l x = \cases
 --------------------------------------------------------------------------------
 -- Conversion modulo isomorphism
 
-convIso0 :: (MonadPlus m) => Term -> Term -> m Iso
+convIso0 :: Term -> Term -> [Iso]
 convIso0 t u = fmap (\(i, j) -> i <> sym j) $ convIso 0 (eval [] t) (eval [] u)
 
-convIso :: (MonadPlus m) => Level -> Value -> Value -> m (Iso, Iso)
+convIso :: Level -> Value -> Value -> [(Iso, Iso)]
 convIso l = \cases
   -- pi is only convertible with pi under the isomorphisms we consider here
   (VPi _ a b) (VPi _ a' b') -> convPi l a b a' b'
-  (VPi {}) _ -> empty
-  _ (VPi {}) -> empty
+  (VPi {}) _ -> []
+  _ (VPi {}) -> []
   -- likewise
   (VSigma _ a b) (VSigma _ a' b') -> convSigma l a b a' b'
-  (VSigma {}) _ -> empty
-  _ (VSigma {}) -> empty
-  t u -> (Refl, Refl) <$ guard (conv l t u)
+  (VSigma {}) _ -> []
+  _ (VSigma {}) -> []
+  t u -> [(Refl, Refl) | conv l t u]
 
 dependsOnLevelsBetween :: Level -> Level -> Value -> Bool
 dependsOnLevelsBetween from to = go to
@@ -420,13 +411,12 @@ pickDomain l x a b = (x, a, b, Refl) : go l b
       n -> piCongR (swaps (n - 1)) <> PiSwap
 
 convPi ::
-  (MonadPlus m) =>
   Level ->
   Value ->
   (Value -> Value) ->
   Value ->
   (Value -> Value) ->
-  m (Iso, Iso)
+  [(Iso, Iso)]
 convPi l = \cases
   -- Curry first
   (VSigma x a b) c (VSigma x' a' b') c' -> do
@@ -457,17 +447,17 @@ convPi l = \cases
         (\u' -> VPi x' (b' u') \v' -> c' (VPair u' v'))
     pure (i, Curry <> i')
   -- Then try different domain orders
-  a b a' b' ->
-    forAlt (pickDomain l "x" a' b') \(_, a'', b'', s) -> do
-      (ia, ia') <- convIso l a a''
-      (ib, ib') <-
-        convIso
-          (l + 1)
-          (b (transportInv ia (VVar l)))
-          (b'' (transportInv ia' (VVar l)))
-      let i = piCongL ia <> piCongR ib
-          i' = s <> piCongL ia' <> piCongR ib'
-      pure (i, i')
+  a b a' b' -> do
+    (_, a'', b'', s) <- pickDomain l "x" a' b'
+    (ia, ia') <- convIso l a a''
+    (ib, ib') <-
+      convIso
+        (l + 1)
+        (b (transportInv ia (VVar l)))
+        (b'' (transportInv ia' (VVar l)))
+    let i = piCongL ia <> piCongR ib
+        i' = s <> piCongL ia' <> piCongR ib'
+    pure (i, i')
 
 instantiateSigmaAt :: Int -> Value -> Value -> Value
 instantiateSigmaAt = \cases
@@ -509,13 +499,12 @@ pickProjection l x a b = (x, a, b, Refl) : go l b
       n -> sigmaCongR (swaps i (n - 1)) <> SigmaSwap
 
 convSigma ::
-  (MonadPlus m) =>
   Level ->
   Value ->
   (Value -> Value) ->
   Value ->
   (Value -> Value) ->
-  m (Iso, Iso)
+  [(Iso, Iso)]
 convSigma l = \cases
   -- Assoc first
   (VSigma x a b) c (VSigma x' a' b') c' -> do
@@ -546,17 +535,17 @@ convSigma l = \cases
         (\u' -> VSigma x' (b' u') \v' -> c' (VPair u' v'))
     pure (i, Assoc <> i')
   -- Then try different projection orders
-  a b a' b' ->
-    forAlt (pickProjection l "x" a' b') \(_, a'', b'', s) -> do
-      (ia, ia') <- convIso l a a''
-      (ib, ib') <-
-        convIso
-          (l + 1)
-          (b (transportInv ia (VVar l)))
-          (b'' (transportInv ia' (VVar l)))
-      let i = sigmaCongL ia <> sigmaCongR ib
-          i' = s <> sigmaCongL ia' <> sigmaCongR ib'
-      pure (i, i')
+  a b a' b' -> do
+    (_, a'', b'', s) <- pickProjection l "x" a' b'
+    (ia, ia') <- convIso l a a''
+    (ib, ib') <-
+      convIso
+        (l + 1)
+        (b (transportInv ia (VVar l)))
+        (b'' (transportInv ia' (VVar l)))
+    let i = sigmaCongL ia <> sigmaCongR ib
+        i' = s <> sigmaCongL ia' <> sigmaCongR ib'
+    pure (i, i')
 
 conv :: Level -> Value -> Value -> Bool
 conv l = \cases
@@ -594,34 +583,36 @@ convSpine l = \cases
 --------------------------------------------------------------------------------
 -- Type normalisation + Permutation
 
-normalisePermute0 :: (MonadPlus m) => Term -> m (Term, Iso)
+normalisePermute0 :: Term -> [(Term, Iso)]
 normalisePermute0 t = normalisePermute 0 (eval [] t)
 
-normalisePermute :: (MonadPlus m) => Level -> Value -> m (Term, Iso)
+normalisePermute :: Level -> Value -> [(Term, Iso)]
 normalisePermute l = \case
   VPi x a b -> normalisePermutePi l x a b
   VSigma x a b -> normalisePermuteSigma l x a b
   v -> pure (quote l v, mempty)
 
 normalisePermutePi ::
-  (MonadPlus m) => Level -> Name -> Value -> (Value -> Value) -> m (Term, Iso)
+  Level -> Name -> Value -> (Value -> Value) -> [(Term, Iso)]
 normalisePermutePi l x = \cases
   (VSigma y a b) c -> do
     (t, i) <- normalisePermutePi l y a \u -> VPi x (b u) \v -> c (VPair u v)
     pure (t, Curry <> i)
-  a b -> forAlt (pickDomain l x a b) \(y, a', b', s) -> do
+  a b -> do
+    (y, a', b', s) <- pickDomain l x a b
     (ta, ia) <- normalisePermute l a'
     (tb, ib) <- normalisePermute (l + 1) (b' (transportInv ia (VVar l)))
     let i = s <> piCongL ia <> piCongR ib
     pure (Pi y ta tb, i)
 
 normalisePermuteSigma ::
-  (MonadPlus m) => Level -> Name -> Value -> (Value -> Value) -> m (Term, Iso)
+  Level -> Name -> Value -> (Value -> Value) -> [(Term, Iso)]
 normalisePermuteSigma l x = \cases
   (VSigma y a b) c -> do
     (t, i) <- normalisePermuteSigma l y a \u -> VSigma x (b u) \v -> c (VPair u v)
     pure (t, Assoc <> i)
-  a b -> forAlt (pickProjection l x a b) \(y, a', b', s) -> do
+  a b -> do
+    (y, a', b', s) <- (pickProjection l x a b)
     (ta, ia) <- normalisePermute l a'
     (tb, ib) <- normalisePermute (l + 1) (b' (transportInv ia (VVar l)))
     let i = s <> sigmaCongL ia <> sigmaCongR ib
