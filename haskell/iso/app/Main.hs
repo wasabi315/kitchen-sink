@@ -11,7 +11,7 @@ infixr 6 ***
 --------------------------------------------------------------------------------
 
 main :: IO ()
-main = for_ [ex1, ex2, ex3] \t -> do
+main = for_ [ex1, ex2, ex3, listind2] \t -> do
   putStrLn $ prettyTerm [] 0 t "\n"
   let (t', i) = normalise0 t
   putStrLn $ "  ↓ " ++ prettyIso 0 i "\n"
@@ -30,7 +30,7 @@ ex2 = quote 0 $
   VPi "F" (VU *** VU --> VU) \f ->
     VPi "A" VU \a ->
       VPi "B" VU \b ->
-        f $$ a $$ b
+        f $$ VPair a b
 
 ex3 :: Term
 ex3 = quote 0 $
@@ -84,6 +84,15 @@ listind2 = quote 0 $
             --> (p $$ xs)
 
 --------------------------------------------------------------------------------
+-- Util
+
+infix 2 //
+
+-- strict pair construction
+(//) :: a -> b -> (a, b)
+a // b = (a, b)
+
+--------------------------------------------------------------------------------
 -- Terms
 
 type Name = String
@@ -129,10 +138,10 @@ pattern VVar :: Level -> Value
 pattern VVar x = VRigid x SNil
 
 (-->) :: Value -> Value -> Value
-a --> b = VPi "_" a \_ -> b
+a --> b = VPi "_" a \ ~_ -> b
 
 (***) :: Value -> Value -> Value
-a *** b = VSigma "_" a \_ -> b
+a *** b = VSigma "_" a \ ~_ -> b
 
 instance IsString Value where
   fromString s = VTop s SNil
@@ -144,20 +153,20 @@ eval env = \case
   Var (Index x) -> env !! x
   Top x -> VTop x SNil
   U -> VU
-  Pi x a b -> VPi x (eval env a) \v -> eval (v : env) b
+  Pi x a b -> VPi x (eval env a) \ ~v -> eval (v : env) b
   Lam x t -> VLam x \v -> eval (v : env) t
   t :$$ u -> eval env t $$ eval env u
-  Sigma x a b -> VSigma x (eval env a) \v -> eval (v : env) b
+  Sigma x a b -> VSigma x (eval env a) \ ~v -> eval (v : env) b
   Pair t u -> VPair (eval env t) (eval env u)
   Fst t -> vfst (eval env t)
   Snd t -> vsnd (eval env t)
 
 ($$) :: Value -> Value -> Value
-($$) = \cases
-  (VLam _ f) u -> f u
-  (VRigid x sp) u -> VRigid x (SApp sp u)
-  (VTop x sp) u -> VTop x (SApp sp u)
-  _ _ -> error "($$): not a function"
+t $$ u = case t of
+  VLam _ f -> f u
+  VRigid x sp -> VRigid x (SApp sp u)
+  VTop x sp -> VTop x (SApp sp u)
+  _ -> error "($$): not a lambda"
 
 vfst :: Value -> Value
 vfst = \case
@@ -278,35 +287,35 @@ sigmaCongR = \case
 
 -- transport along an isomorphism
 transport :: Iso -> Value -> Value
-transport = \cases
-  Refl v -> v
-  (Sym i) v -> transportInv i v
-  (Trans i j) v -> transport j (transport i v)
-  Assoc v -> vfst (vfst v) `VPair` (vsnd (vfst v) `VPair` vsnd v)
-  Comm v -> vsnd v `VPair` vfst v
-  SigmaSwap v -> vfst (vsnd v) `VPair` (vfst v `VPair` vsnd (vsnd v))
-  Curry v -> VLam "x" \x -> VLam "y" \y -> v $$ VPair x y
-  PiSwap v -> VLam "y" \y -> VLam "x" \x -> v $$ x $$ y
-  (PiCongL i) v -> VLam "x" \x -> v $$ transportInv i x
-  (PiCongR i) v -> VLam "x" \x -> transport i (v $$ x)
-  (SigmaCongL i) v -> transport i (vfst v) `VPair` vsnd v
-  (SigmaCongR i) v -> vfst v `VPair` transport i (vsnd v)
+transport i v = case i of
+  Refl -> v
+  Sym i -> transportInv i v
+  Trans i j -> transport j (transport i v)
+  Assoc -> vfst (vfst v) `VPair` (vsnd (vfst v) `VPair` vsnd v)
+  Comm -> vsnd v `VPair` vfst v
+  SigmaSwap -> vfst (vsnd v) `VPair` (vfst v `VPair` vsnd (vsnd v))
+  Curry -> VLam "x" \x -> VLam "y" \y -> v $$ VPair x y
+  PiSwap -> VLam "y" \y -> VLam "x" \x -> v $$ x $$ y
+  PiCongL i -> VLam "x" \x -> v $$ transportInv i x
+  PiCongR i -> VLam "x" \x -> transport i (v $$ x)
+  SigmaCongL i -> transport i (vfst v) `VPair` vsnd v
+  SigmaCongR i -> vfst v `VPair` transport i (vsnd v)
 
 -- transport back
 transportInv :: Iso -> Value -> Value
-transportInv = \cases
-  Refl v -> v
-  (Sym i) v -> transport i v
-  (Trans i j) v -> transportInv i (transportInv j v)
-  Assoc v -> (vfst v `VPair` vfst (vsnd v)) `VPair` vsnd (vsnd v)
-  Comm v -> vsnd v `VPair` vfst v
-  SigmaSwap v -> vfst (vsnd v) `VPair` (vfst v `VPair` vsnd (vsnd v))
-  Curry v -> VLam "p" \p -> v $$ vfst p $$ vsnd p
-  PiSwap v -> VLam "x" \x -> VLam "y" \y -> v $$ y $$ x
-  (PiCongL i) v -> VLam "x" \x -> v $$ transport i x
-  (PiCongR i) v -> VLam "x" \x -> transportInv i (v $$ x)
-  (SigmaCongL i) v -> transportInv i (vfst v) `VPair` vsnd v
-  (SigmaCongR i) v -> vfst v `VPair` transportInv i (vsnd v)
+transportInv i v = case i of
+  Refl -> v
+  Sym i -> transport i v
+  Trans i j -> transportInv i (transportInv j v)
+  Assoc -> (vfst v `VPair` vfst (vsnd v)) `VPair` vsnd (vsnd v)
+  Comm -> vsnd v `VPair` vfst v
+  SigmaSwap -> vfst (vsnd v) `VPair` (vfst v `VPair` vsnd (vsnd v))
+  Curry -> VLam "p" \p -> v $$ vfst p $$ vsnd p
+  PiSwap -> VLam "x" \x -> VLam "y" \y -> v $$ y $$ x
+  PiCongL i -> VLam "x" \x -> v $$ transport i x
+  PiCongR i -> VLam "x" \x -> transportInv i (v $$ x)
+  SigmaCongL i -> transportInv i (vfst v) `VPair` vsnd v
+  SigmaCongR i -> vfst v `VPair` transportInv i (vsnd v)
 
 --------------------------------------------------------------------------------
 -- Type normalisation
@@ -319,35 +328,37 @@ normalise :: Level -> Value -> (Term, Iso)
 normalise l = \case
   VPi x a b -> normalisePi l x a b
   VSigma x a b -> normaliseSigma l x a b
-  v -> (quote l v, mempty)
+  v -> quote l v // mempty
 
 -- currying
 normalisePi :: Level -> Name -> Value -> (Value -> Value) -> (Term, Iso)
 normalisePi l x = \cases
-  (VSigma y a b) c ->
-    let (t, i) = normalisePi l y a \u -> VPi x (b u) \v -> c (VPair u v)
-     in (t, Curry <> i)
-  a b ->
+  (VSigma y a b) c -> do
+    let (t, i) = normalisePi l y a \ ~u -> VPi x (b u) \ ~v -> c (VPair u v)
+    t // Curry <> i
+  a b -> do
     let (ta, ia) = normalise l a
         (tb, ib) = normalise (l + 1) (b (transportInv ia (VVar l)))
-     in (Pi x ta tb, piCongL ia <> piCongR ib)
+    Pi x ta tb // piCongL ia <> piCongR ib
 
 -- make sigmas more right-nested
 normaliseSigma :: Level -> Name -> Value -> (Value -> Value) -> (Term, Iso)
 normaliseSigma l x = \cases
-  (VSigma y a b) c ->
-    let (t, i) = normaliseSigma l y a \u -> VSigma x (b u) \v -> c (VPair u v)
-     in (t, Assoc <> i)
-  a b ->
+  (VSigma y a b) c -> do
+    let (t, i) = normaliseSigma l y a \ ~u -> VSigma x (b u) \ ~v -> c (VPair u v)
+    t // Assoc <> i
+  a b -> do
     let (ta, ia) = normalise l a
         (tb, ib) = normalise (l + 1) (b (transportInv ia (VVar l)))
-     in (Sigma x ta tb, sigmaCongL ia <> sigmaCongR ib)
+    Sigma x ta tb // sigmaCongL ia <> sigmaCongR ib
 
 --------------------------------------------------------------------------------
 -- Conversion modulo isomorphism
 
 convIso0 :: Term -> Term -> [Iso]
-convIso0 t u = fmap (\(i, j) -> i <> sym j) $ convIso 0 (eval [] t) (eval [] u)
+convIso0 t u = do
+  (i, j) <- convIso 0 (eval [] t) (eval [] u)
+  pure $! i <> sym j
 
 convIso :: Level -> Value -> Value -> [(Iso, Iso)]
 convIso l = \cases
@@ -383,9 +394,9 @@ dependsOnLevelsBetween from to = go to
 
 instantiatePiAt :: Int -> Value -> Value -> Value
 instantiatePiAt = \cases
-  i _ _ | i < 0 -> error "instantiatePiAt: negative index"
-  0 v (VPi _ _ b) -> b v
-  i v (VPi x a b) -> VPi x a (instantiatePiAt (i - 1) v . b)
+  i ~_ _ | i < 0 -> error "instantiatePiAt: negative index"
+  0 ~v (VPi _ _ b) -> b v
+  i ~v (VPi x a b) -> VPi x a (instantiatePiAt (i - 1) v . b)
   _ _ _ -> error "instantiatePiAt: not a pi"
 
 pickDomain ::
@@ -400,14 +411,14 @@ pickDomain l x a b = (x, a, b, Refl) : go l b
       VPi _ c1 c2
         | dependsOnLevelsBetween l l' c1 -> go (l' + 1) c2
       VPi y c1 c2 -> do
-        let rest vc1 = VPi x a \v ->
-              instantiatePiAt (coerce $ l' - l) vc1 (b v)
-            picked = (y, c1, rest, swaps (l' - l))
-        picked : go (l' + 1) c2
+        let i = coerce (l' - l)
+            rest ~vc1 = VPi x a (instantiatePiAt i vc1 . b)
+            s = swaps i
+        (y, c1, rest, s) : go (l' + 1) c2
       _ -> []
 
     swaps = \case
-      0 -> PiSwap
+      (0 :: Int) -> PiSwap
       n -> piCongR (swaps (n - 1)) <> PiSwap
 
 convPi ::
@@ -424,19 +435,19 @@ convPi l = \cases
       convPi
         l
         a
-        (\u -> VPi x (b u) \v -> c (VPair u v))
+        (\ ~u -> VPi x (b u) \ ~v -> c (VPair u v))
         a'
-        (\u' -> VPi x' (b' u') \v' -> c' (VPair u' v'))
-    pure (Curry <> i, Curry <> i')
+        (\ ~u' -> VPi x' (b' u') \ ~v' -> c' (VPair u' v'))
+    pure $! Curry <> i // Curry <> i'
   (VSigma x a b) c a' b' -> do
     (i, i') <-
       convPi
         l
         a
-        (\u -> VPi x (b u) \v -> c (VPair u v))
+        (\ ~u -> VPi x (b u) \ ~v -> c (VPair u v))
         a'
         b'
-    pure (Curry <> i, i')
+    pure $! Curry <> i // i'
   a b (VSigma x' a' b') c' -> do
     (i, i') <-
       convPi
@@ -444,26 +455,24 @@ convPi l = \cases
         a
         b
         a'
-        (\u' -> VPi x' (b' u') \v' -> c' (VPair u' v'))
-    pure (i, Curry <> i')
+        (\ ~u' -> VPi x' (b' u') \ ~v' -> c' (VPair u' v'))
+    pure $! i // Curry <> i'
   -- Then try different domain orders
   a b a' b' -> do
-    (_, a'', b'', s) <- pickDomain l "x" a' b'
-    (ia, ia') <- convIso l a a''
+    (_, a', b', s) <- pickDomain l "x" a' b'
+    (ia, ia') <- convIso l a a'
     (ib, ib') <-
       convIso
         (l + 1)
         (b (transportInv ia (VVar l)))
-        (b'' (transportInv ia' (VVar l)))
-    let i = piCongL ia <> piCongR ib
-        i' = s <> piCongL ia' <> piCongR ib'
-    pure (i, i')
+        (b' (transportInv ia' (VVar l)))
+    pure $! piCongL ia <> piCongR ib // s <> piCongL ia' <> piCongR ib'
 
 instantiateSigmaAt :: Int -> Value -> Value -> Value
 instantiateSigmaAt = \cases
-  i _ _ | i < 0 -> error "instantiateSigmaAt: negative index"
-  0 v (VSigma _ _ b) -> b v
-  i v (VSigma x a b) -> VSigma x a (instantiateSigmaAt (i - 1) v . b)
+  i ~_ _ | i < 0 -> error "instantiateSigmaAt: negative index"
+  0 ~v (VSigma _ _ b) -> b v
+  i ~v (VSigma x a b) -> VSigma x a (instantiateSigmaAt (i - 1) v . b)
   _ _ _ -> error "instantiateSigmaAt: not a sigma"
 
 dropLastProjection :: Level -> Value -> Value
@@ -485,17 +494,18 @@ pickProjection l x a b = (x, a, b, Refl) : go l b
       VSigma _ c1 c2
         | dependsOnLevelsBetween l l' c1 -> go (l' + 1) c2
       VSigma y c1 c2 -> do
-        let rest vc1 = VSigma x a \v ->
-              instantiateSigmaAt (coerce $ l' - l) vc1 (b v)
-            picked = (y, c1, rest, swaps SigmaSwap (l' - l))
-        picked : go (l' + 1) c2
+        let i = coerce (l' - l)
+            rest ~vc1 = VSigma x a (instantiateSigmaAt i vc1 . b)
+            s = swaps SigmaSwap i
+        (y, c1, rest, s) : go (l' + 1) c2
       c' | dependsOnLevelsBetween l l' c' -> []
       c' -> do
-        let rest _ = dropLastProjection l' (VSigma x a b)
-        [("last", c', rest, swaps Comm (l' - l))]
+        let rest ~_ = dropLastProjection l' (VSigma x a b)
+            s = swaps Comm (coerce $ l' - l)
+        [("last", c', rest, s)]
 
     swaps i = \case
-      0 -> i
+      (0 :: Int) -> i
       n -> sigmaCongR (swaps i (n - 1)) <> SigmaSwap
 
 convSigma ::
@@ -512,19 +522,19 @@ convSigma l = \cases
       convSigma
         l
         a
-        (\u -> VSigma x (b u) \v -> c (VPair u v))
+        (\ ~u -> VSigma x (b u) \ ~v -> c (VPair u v))
         a'
-        (\u' -> VSigma x' (b' u') \v' -> c' (VPair u' v'))
-    pure (Assoc <> i, Assoc <> i')
+        (\ ~u' -> VSigma x' (b' u') \ ~v' -> c' (VPair u' v'))
+    pure $! Assoc <> i // Assoc <> i'
   (VSigma x a b) c a' b' -> do
     (i, i') <-
       convSigma
         l
         a
-        (\u -> VSigma x (b u) \v -> c (VPair u v))
+        (\ ~u -> VSigma x (b u) \ ~v -> c (VPair u v))
         a'
         b'
-    pure (Assoc <> i, i')
+    pure $! Assoc <> i // i'
   a b (VSigma x' a' b') c' -> do
     (i, i') <-
       convSigma
@@ -532,20 +542,18 @@ convSigma l = \cases
         a
         b
         a'
-        (\u' -> VSigma x' (b' u') \v' -> c' (VPair u' v'))
-    pure (i, Assoc <> i')
+        (\ ~u' -> VSigma x' (b' u') \ ~v' -> c' (VPair u' v'))
+    pure $! i // Assoc <> i'
   -- Then try different projection orders
   a b a' b' -> do
-    (_, a'', b'', s) <- pickProjection l "x" a' b'
-    (ia, ia') <- convIso l a a''
+    (_, a', b', s) <- pickProjection l "x" a' b'
+    (ia, ia') <- convIso l a a'
     (ib, ib') <-
       convIso
         (l + 1)
         (b (transportInv ia (VVar l)))
-        (b'' (transportInv ia' (VVar l)))
-    let i = sigmaCongL ia <> sigmaCongR ib
-        i' = s <> sigmaCongL ia' <> sigmaCongR ib'
-    pure (i, i')
+        (b' (transportInv ia' (VVar l)))
+    pure $! sigmaCongL ia <> sigmaCongR ib // s <> sigmaCongL ia' <> sigmaCongR ib'
 
 conv :: Level -> Value -> Value -> Bool
 conv l = \cases
@@ -596,27 +604,25 @@ normalisePermutePi ::
   Level -> Name -> Value -> (Value -> Value) -> [(Term, Iso)]
 normalisePermutePi l x = \cases
   (VSigma y a b) c -> do
-    (t, i) <- normalisePermutePi l y a \u -> VPi x (b u) \v -> c (VPair u v)
-    pure (t, Curry <> i)
+    (t, i) <- normalisePermutePi l y a \ ~u -> VPi x (b u) \ ~v -> c (VPair u v)
+    pure $! t // Curry <> i
   a b -> do
-    (y, a', b', s) <- pickDomain l x a b
-    (ta, ia) <- normalisePermute l a'
-    (tb, ib) <- normalisePermute (l + 1) (b' (transportInv ia (VVar l)))
-    let i = s <> piCongL ia <> piCongR ib
-    pure (Pi y ta tb, i)
+    (y, a, b, s) <- pickDomain l x a b
+    (ta, ia) <- normalisePermute l a
+    (tb, ib) <- normalisePermute (l + 1) (b (transportInv ia (VVar l)))
+    pure $! Pi y ta tb // s <> piCongL ia <> piCongR ib
 
 normalisePermuteSigma ::
   Level -> Name -> Value -> (Value -> Value) -> [(Term, Iso)]
 normalisePermuteSigma l x = \cases
   (VSigma y a b) c -> do
-    (t, i) <- normalisePermuteSigma l y a \u -> VSigma x (b u) \v -> c (VPair u v)
-    pure (t, Assoc <> i)
+    (t, i) <- normalisePermuteSigma l y a \ ~u -> VSigma x (b u) \ ~v -> c (VPair u v)
+    pure $! t // Assoc <> i
   a b -> do
-    (y, a', b', s) <- (pickProjection l x a b)
-    (ta, ia) <- normalisePermute l a'
-    (tb, ib) <- normalisePermute (l + 1) (b' (transportInv ia (VVar l)))
-    let i = s <> sigmaCongL ia <> sigmaCongR ib
-    pure (Sigma y ta tb, i)
+    (y, a, b, s) <- (pickProjection l x a b)
+    (ta, ia) <- normalisePermute l a
+    (tb, ib) <- normalisePermute (l + 1) (b (transportInv ia (VVar l)))
+    pure $! Sigma y ta tb // s <> sigmaCongL ia <> sigmaCongR ib
 
 --------------------------------------------------------------------------------
 
