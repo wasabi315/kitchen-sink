@@ -461,11 +461,9 @@ convPi l = \cases
   a b a' b' -> do
     (_, a', b', s) <- pickDomain l "x" a' b'
     (ia, ia') <- convIso l a a'
-    (ib, ib') <-
-      convIso
-        (l + 1)
-        (b (transportInv ia (VVar l)))
-        (b' (transportInv ia' (VVar l)))
+    let ~v = transportInv ia (VVar l)
+        ~v' = transportInv ia' (VVar l)
+    (ib, ib') <- convIso (l + 1) (b v) (b' v')
     pure $! piCongL ia <> piCongR ib // s <> piCongL ia' <> piCongR ib'
 
 instantiateSigmaAt :: Int -> Value -> Value -> Value
@@ -548,11 +546,9 @@ convSigma l = \cases
   a b a' b' -> do
     (_, a', b', s) <- pickProjection l "x" a' b'
     (ia, ia') <- convIso l a a'
-    (ib, ib') <-
-      convIso
-        (l + 1)
-        (b (transportInv ia (VVar l)))
-        (b' (transportInv ia' (VVar l)))
+    let ~v = transportInv ia (VVar l)
+        ~v' = transportInv ia' (VVar l)
+    (ib, ib') <- convIso (l + 1) (b v) (b' v')
     pure $! sigmaCongL ia <> sigmaCongR ib // s <> sigmaCongL ia' <> sigmaCongR ib'
 
 conv :: Level -> Value -> Value -> Bool
@@ -609,7 +605,8 @@ normalisePermutePi l x = \cases
   a b -> do
     (y, a, b, s) <- pickDomain l x a b
     (ta, ia) <- normalisePermute l a
-    (tb, ib) <- normalisePermute (l + 1) (b (transportInv ia (VVar l)))
+    let ~v = transportInv ia (VVar l)
+    (tb, ib) <- normalisePermute (l + 1) (b v)
     pure $! Pi y ta tb // s <> piCongL ia <> piCongR ib
 
 normalisePermuteSigma ::
@@ -621,7 +618,8 @@ normalisePermuteSigma l x = \cases
   a b -> do
     (y, a, b, s) <- (pickProjection l x a b)
     (ta, ia) <- normalisePermute l a
-    (tb, ib) <- normalisePermute (l + 1) (b (transportInv ia (VVar l)))
+    let ~v = transportInv ia (VVar l)
+    (tb, ib) <- normalisePermute (l + 1) (b v)
     pure $! Sigma y ta tb // s <> sigmaCongL ia <> sigmaCongR ib
 
 --------------------------------------------------------------------------------
