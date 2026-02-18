@@ -1,7 +1,11 @@
 module Main where
 
+import Control.Applicative
+import Control.Monad
+import Control.Parallel.Strategies
 import Data.Coerce
 import Data.Foldable
+import Data.Monoid
 import Data.String
 
 infixr 5 -->
@@ -11,13 +15,32 @@ infixr 6 ***
 --------------------------------------------------------------------------------
 
 main :: IO ()
-main = for_ [ex1, ex2, ex3, listind2] \t -> do
-  putStrLn $ prettyTerm [] 0 t "\n"
-  let (t', i) = normalise0 t
-  putStrLn $ "  ↓ " ++ prettyIso 0 i "\n"
-  putStrLn $ prettyTerm [] 0 t' "\n"
-  putStrLn "conversion function:"
-  putStrLn $ "  " ++ prettyTerm [] 0 (quote 0 (VLam "x" $ transport i)) "\n\n"
+main = for_ (take 10000 $ normalisePermute0 compSquareH) \(t, _) -> do
+  case convIso0 compSquareH t of
+    Nothing -> error "impossible"
+    Just _ -> pure ()
+
+compSquareH :: Term
+compSquareH = quote 0 $
+  VPi "A" VU \a ->
+    VPi "a00" a \a00 -> VPi "a01" a \a01 -> VPi "a02" a \a02 ->
+      VPi "a10" a \a10 -> VPi "a11" a \a11 -> VPi "a12" a \a12 ->
+        VPi "a0'" ("Eq" $$ a $$ a00 $$ a01) \a0' ->
+          VPi "b0'" ("Eq" $$ a $$ a01 $$ a02) \b0' ->
+            VPi "a1'" ("Eq" $$ a $$ a10 $$ a11) \a1' ->
+              VPi "b1'" ("Eq" $$ a $$ a11 $$ a12) \b1' ->
+                VPi "a'0" ("Eq" $$ a $$ a00 $$ a10) \a'0 ->
+                  VPi "a'1" ("Eq" $$ a $$ a01 $$ a11) \a'1 ->
+                    VPi "a'2" ("Eq" $$ a $$ a02 $$ a12) \a'2 ->
+                      ("Square" $$ a $$ a0' $$ a1' $$ a'0 $$ a'1)
+                        --> ("Square" $$ a $$ b0' $$ b1' $$ a'1 $$ a'2)
+                        --> ( "Square"
+                                $$ a
+                                $$ ("compPath" $$ a $$ a00 $$ a01 $$ a02 $$ a0' $$ b0')
+                                $$ ("compPath" $$ a $$ a10 $$ a11 $$ a12 $$ a1' $$ b1')
+                                $$ a'0
+                                $$ a'2
+                            )
 
 ex1 :: Term
 ex1 = quote 0 $
@@ -83,6 +106,28 @@ listind2 = quote 0 $
           (p $$ ("nil" $$ a))
             --> (p $$ xs)
 
+square1, square2 :: Term
+square1 = quote 0 $
+  VPi "A" VU \a ->
+    VPi "a00" a \a00 -> VPi "a01" a \a01 ->
+      VPi "a10" a \a10 -> VPi "a11" a \a11 ->
+        ("Eq" $$ a $$ a00 $$ a01)
+          --> ("Eq" $$ a $$ a10 $$ a11)
+          --> ("Eq" $$ a $$ a00 $$ a10)
+          --> ("Eq" $$ a $$ a01 $$ a11)
+          --> VU
+square2 = quote 0 $
+  VPi "A" VU \a ->
+    VPi "a11" a \a11 ->
+      VPi "a10" a \a10 ->
+        ("Eq" $$ a $$ a10 $$ a11)
+          --> VPi "a01" a \a01 ->
+            ("Eq" $$ a $$ a01 $$ a11)
+              --> VPi "a00" a \a00 ->
+                ("Eq" $$ a $$ a00 $$ a10)
+                  --> ("Eq" $$ a $$ a00 $$ a01)
+                  --> VU
+
 --------------------------------------------------------------------------------
 -- Util
 
@@ -91,6 +136,9 @@ infix 2 //
 -- strict pair construction
 (//) :: a -> b -> (a, b)
 a // b = (a, b)
+
+foldMapA :: (Alternative f, Foldable t) => (a -> f b) -> t a -> f b
+foldMapA f = getAlt . foldMap (Alt . f)
 
 --------------------------------------------------------------------------------
 -- Terms
@@ -388,23 +436,6 @@ normaliseSigma l x = \cases
 --------------------------------------------------------------------------------
 -- Conversion modulo isomorphism
 
-convIso0 :: Term -> Term -> [Iso]
-convIso0 t u = do
-  (i, j) <- convIso 0 (eval [] t) (eval [] u)
-  pure $! i <> sym j
-
-convIso :: Level -> Value -> Value -> [(Iso, Iso)]
-convIso l = \cases
-  -- pi is only convertible with pi under the isomorphisms we consider here
-  (VPi _ a b) (VPi _ a' b') -> convPi l a b a' b'
-  (VPi {}) _ -> []
-  _ (VPi {}) -> []
-  -- likewise
-  (VSigma _ a b) (VSigma _ a' b') -> convSigma l a b a' b'
-  (VSigma {}) _ -> []
-  _ (VSigma {}) -> []
-  t u -> [(Refl, Refl) | conv l t u]
-
 dependsOnLevelsBetween :: Level -> Level -> Value -> Bool
 dependsOnLevelsBetween from to = go to
   where
@@ -454,50 +485,6 @@ pickDomain l x a b = (x, a, b, Refl) : go l b
       (0 :: Int) -> PiSwap
       n -> piCongR (swaps (n - 1)) <> PiSwap
 
-convPi ::
-  Level ->
-  Value ->
-  (Value -> Value) ->
-  Value ->
-  (Value -> Value) ->
-  [(Iso, Iso)]
-convPi l = go Refl Refl
-  where
-    go i i' = \cases
-      -- Curry first
-      (VSigma x a b) c (VSigma x' a' b') c' -> do
-        go
-          (i <> Curry)
-          (i' <> Curry)
-          a
-          (\ ~u -> VPi x (b u) \ ~v -> c (VPair u v))
-          a'
-          (\ ~u' -> VPi x' (b' u') \ ~v' -> c' (VPair u' v'))
-      (VSigma x a b) c a' b' ->
-        go
-          (i <> Curry)
-          i'
-          a
-          (\ ~u -> VPi x (b u) \ ~v -> c (VPair u v))
-          a'
-          b'
-      a b (VSigma x' a' b') c' -> do
-        go
-          i
-          (i' <> Curry)
-          a
-          b
-          a'
-          (\ ~u' -> VPi x' (b' u') \ ~v' -> c' (VPair u' v'))
-      -- Then try different domain orders
-      a b a' b' -> do
-        (_, a', b', s) <- pickDomain l "x" a' b'
-        (ia, ia') <- convIso l a a'
-        let ~v = transportInv ia (VVar l)
-            ~v' = transportInv ia' (VVar l)
-        (ib, ib') <- convIso (l + 1) (b v) (b' v')
-        pure $! i <> piCongL ia <> piCongR ib // i' <> s <> piCongL ia' <> piCongR ib'
-
 instantiateSigmaAt :: Int -> Value -> Value -> Value
 instantiateSigmaAt = \cases
   i ~_ _ | i < 0 -> error "instantiateSigmaAt: negative index"
@@ -538,14 +525,82 @@ pickProjection l x a b = (x, a, b, Refl) : go l b
       (0 :: Int) -> i
       n -> sigmaCongR (swaps i (n - 1)) <> SigmaSwap
 
-convSigma ::
+convIso0 :: (MonadPlus m) => Term -> Term -> m Iso
+convIso0 t u = do
+  (i, j) <- convIso 2 0 (eval [] t) (eval [] u)
+  pure $! i <> sym j
+
+convIso :: (MonadPlus m) => Int -> Level -> Value -> Value -> m (Iso, Iso)
+convIso p l = \cases
+  -- pi is only convertible with pi under the isomorphisms we consider here
+  (VPi _ a b) (VPi _ a' b') -> convPi p l a b a' b'
+  (VPi {}) _ -> empty
+  _ (VPi {}) -> empty
+  -- likewise
+  (VSigma _ a b) (VSigma _ a' b') -> convSigma p l a b a' b'
+  (VSigma {}) _ -> empty
+  _ (VSigma {}) -> empty
+  t u -> (Refl, Refl) <$ guard (conv l t u)
+
+convPi ::
+  (MonadPlus m) =>
+  Int ->
   Level ->
   Value ->
   (Value -> Value) ->
   Value ->
   (Value -> Value) ->
-  [(Iso, Iso)]
-convSigma l = go Refl Refl
+  m (Iso, Iso)
+convPi p l = go Refl Refl
+  where
+    go i i' = \cases
+      -- Curry first
+      (VSigma x a b) c (VSigma x' a' b') c' -> do
+        go
+          (i <> Curry)
+          (i' <> Curry)
+          a
+          (\ ~u -> VPi x (b u) \ ~v -> c (VPair u v))
+          a'
+          (\ ~u' -> VPi x' (b' u') \ ~v' -> c' (VPair u' v'))
+      (VSigma x a b) c a' b' ->
+        go
+          (i <> Curry)
+          i'
+          a
+          (\ ~u -> VPi x (b u) \ ~v -> c (VPair u v))
+          a'
+          b'
+      a b (VSigma x' a' b') c' -> do
+        go
+          i
+          (i' <> Curry)
+          a
+          b
+          a'
+          (\ ~u' -> VPi x' (b' u') \ ~v' -> c' (VPair u' v'))
+      -- Then try different domain orders
+      a b a' b' -> do
+        let branch (_, a', b', s) = do
+              (ia, ia') <- convIso (p - 1) l a a'
+              let ~v = transportInv ia (VVar l)
+                  ~v' = transportInv ia' (VVar l)
+              (ib, ib') <- convIso (p - 1) (l + 1) (b v) (b' v')
+              pure $! i <> piCongL ia <> piCongR ib // i' <> s <> piCongL ia' <> piCongR ib'
+        if p > 0
+          then asum $ parMap rseq branch $ pickDomain l "x" a' b'
+          else foldMapA branch $ pickDomain l "x" a' b'
+
+convSigma ::
+  (MonadPlus m) =>
+  Int ->
+  Level ->
+  Value ->
+  (Value -> Value) ->
+  Value ->
+  (Value -> Value) ->
+  m (Iso, Iso)
+convSigma p l = go Refl Refl
   where
     go i i' = \cases
       -- Assoc first
@@ -575,12 +630,15 @@ convSigma l = go Refl Refl
           (\ ~u' -> VSigma x' (b' u') \ ~v' -> c' (VPair u' v'))
       -- Then try different projection orders
       a b a' b' -> do
-        (_, a', b', s) <- pickProjection l "x" a' b'
-        (ia, ia') <- convIso l a a'
-        let ~v = transportInv ia (VVar l)
-            ~v' = transportInv ia' (VVar l)
-        (ib, ib') <- convIso (l + 1) (b v) (b' v')
-        pure $! i <> sigmaCongL ia <> sigmaCongR ib // i' <> s <> sigmaCongL ia' <> sigmaCongR ib'
+        let branch (_, a', b', s) = do
+              (ia, ia') <- convIso (p - 1) l a a'
+              let ~v = transportInv ia (VVar l)
+                  ~v' = transportInv ia' (VVar l)
+              (ib, ib') <- convIso (p - 1) (l + 1) (b v) (b' v')
+              pure $! i <> sigmaCongL ia <> sigmaCongR ib // i' <> s <> sigmaCongL ia' <> sigmaCongR ib'
+        if p > 0
+          then asum $ parMap rseq branch $ pickProjection l "x" a' b'
+          else foldMapA branch $ pickProjection l "x" a' b'
 
 --------------------------------------------------------------------------------
 -- Type normalisation + Permutation
@@ -592,7 +650,7 @@ normalisePermute :: Level -> Value -> [(Term, Iso)]
 normalisePermute l = \case
   VPi x a b -> normalisePermutePi l x a b
   VSigma x a b -> normalisePermuteSigma l x a b
-  v -> pure (quote l v, mempty)
+  v -> pure $! quote l v // Refl
 
 normalisePermutePi ::
   Level -> Name -> Value -> (Value -> Value) -> [(Term, Iso)]
@@ -602,7 +660,7 @@ normalisePermutePi l = go Refl
       (VSigma y a b) c -> do
         go (i <> Curry) y a \ ~u -> VPi x (b u) \ ~v -> c (VPair u v)
       a b -> do
-        (y, a, b, s) <- pickDomain l x a b
+        (y, a, b, s) <- reverse (pickDomain l x a b)
         (ta, ia) <- normalisePermute l a
         let ~v = transportInv ia (VVar l)
         (tb, ib) <- normalisePermute (l + 1) (b v)
@@ -616,7 +674,7 @@ normalisePermuteSigma l = go Refl
       (VSigma y a b) c -> do
         go (i <> Assoc) y a \ ~u -> VSigma x (b u) \ ~v -> c (VPair u v)
       a b -> do
-        (y, a, b, s) <- (pickProjection l x a b)
+        (y, a, b, s) <- reverse (pickProjection l x a b)
         (ta, ia) <- normalisePermute l a
         let ~v = transportInv ia (VVar l)
         (tb, ib) <- normalisePermute (l + 1) (b v)

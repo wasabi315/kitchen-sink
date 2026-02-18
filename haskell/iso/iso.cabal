@@ -29,6 +29,8 @@ common defaults
         -ddump-to-file
         -fllvm
         -rtsopts
+        -threaded
+        -feager-blackholing
 
 executable iso
     import: defaults
@@ -36,4 +38,5 @@ executable iso
     main-is: Main.hs
     build-depends:
         base >=4.16,
-        containers
+        containers,
+        parallel
