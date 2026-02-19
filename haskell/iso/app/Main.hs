@@ -1,12 +1,19 @@
 module Main where
 
 import Control.Applicative
+import Control.DeepSeq
+import Control.Exception
 import Control.Monad
 import Control.Parallel.Strategies
+import Data.ByteString qualified as BS
 import Data.Coerce
 import Data.Foldable
+import Data.Maybe
 import Data.Monoid
 import Data.String
+import Flat
+import GHC.Generics
+import System.Environment
 
 infixr 5 -->
 
@@ -15,31 +22,44 @@ infixr 6 ***
 --------------------------------------------------------------------------------
 
 main :: IO ()
-main = for_ (take 10000 $ normalisePermute0 compSquareH) \(t, _) -> do
-  case convIso0 compSquareH t of
-    Nothing -> error "impossible"
-    Just _ -> pure ()
+main =
+  getArgs >>= \case
+    ["gen"] -> do
+      let ts = everyNth 5000 $ map fst $ normalisePermute0 compSquareH
+      BS.writeFile "bench.bin" (flat ts)
+    ["bench"] -> do
+      Right ts <- unflat @[Term] <$> BS.readFile "bench.bin"
+      ts <- evaluate $ force ts
+      for_ ts \t -> fromJust (convIso0 compSquareH t) `seq` pure ()
+    _ -> error "invalid argument"
+
+everyNth :: Int -> [a] -> [a]
+everyNth n xs
+  | n <= 0 = []
+  | otherwise = case drop (n - 1) xs of
+      y : ys -> y : everyNth n ys
+      [] -> []
 
 compSquareH :: Term
 compSquareH = quote 0 $
   VPi "A" VU \a ->
     VPi "a00" a \a00 -> VPi "a01" a \a01 -> VPi "a02" a \a02 ->
       VPi "a10" a \a10 -> VPi "a11" a \a11 -> VPi "a12" a \a12 ->
-        VPi "a0'" ("Eq" $$ a $$ a00 $$ a01) \a0' ->
-          VPi "b0'" ("Eq" $$ a $$ a01 $$ a02) \b0' ->
-            VPi "a1'" ("Eq" $$ a $$ a10 $$ a11) \a1' ->
-              VPi "b1'" ("Eq" $$ a $$ a11 $$ a12) \b1' ->
-                VPi "a'0" ("Eq" $$ a $$ a00 $$ a10) \a'0 ->
-                  VPi "a'1" ("Eq" $$ a $$ a01 $$ a11) \a'1 ->
-                    VPi "a'2" ("Eq" $$ a $$ a02 $$ a12) \a'2 ->
-                      ("Square" $$ a $$ a0' $$ a1' $$ a'0 $$ a'1)
-                        --> ("Square" $$ a $$ b0' $$ b1' $$ a'1 $$ a'2)
+        VPi "a0_" ("Eq" $$ a $$ a00 $$ a01) \a0_ ->
+          VPi "b0_" ("Eq" $$ a $$ a01 $$ a02) \b0_ ->
+            VPi "a1_" ("Eq" $$ a $$ a10 $$ a11) \a1_ ->
+              VPi "b1_" ("Eq" $$ a $$ a11 $$ a12) \b1_ ->
+                VPi "a_0" ("Eq" $$ a $$ a00 $$ a10) \a_0 ->
+                  VPi "a_1" ("Eq" $$ a $$ a01 $$ a11) \a_1 ->
+                    VPi "a_2" ("Eq" $$ a $$ a02 $$ a12) \a_2 ->
+                      ("Square" $$ a $$ a0_ $$ a1_ $$ a_0 $$ a_1)
+                        --> ("Square" $$ a $$ b0_ $$ b1_ $$ a_1 $$ a_2)
                         --> ( "Square"
                                 $$ a
-                                $$ ("compPath" $$ a $$ a00 $$ a01 $$ a02 $$ a0' $$ b0')
-                                $$ ("compPath" $$ a $$ a10 $$ a11 $$ a12 $$ a1' $$ b1')
-                                $$ a'0
-                                $$ a'2
+                                $$ ("compPath" $$ a $$ a00 $$ a01 $$ a02 $$ a0_ $$ b0_)
+                                $$ ("compPath" $$ a $$ a10 $$ a11 $$ a12 $$ a1_ $$ b1_)
+                                $$ a_0
+                                $$ a_2
                             )
 
 ex1 :: Term
@@ -146,7 +166,9 @@ foldMapA f = getAlt . foldMap (Alt . f)
 type Name = String
 
 newtype Index = Index Int
+  deriving stock (Generic)
   deriving newtype (Show, Ord, Eq, Num)
+  deriving anyclass (NFData, Flat)
 
 data Term
   = Var Index
@@ -159,7 +181,8 @@ data Term
   | Pair Term Term
   | Fst Term
   | Snd Term
-  deriving (Show)
+  deriving stock (Show, Generic)
+  deriving anyclass (NFData, Flat)
 
 --------------------------------------------------------------------------------
 -- Values and NbE
@@ -330,7 +353,8 @@ data Iso
     --  ----------------------------------
     --   (x : A) * B[x] ~ (x : A) * B'[x]
     SigmaCongR Iso
-  deriving (Show)
+  deriving stock (Show, Generic)
+  deriving anyclass (NFData)
 
 instance Semigroup Iso where
   Refl <> j = j
@@ -650,7 +674,7 @@ normalisePermute :: Level -> Value -> [(Term, Iso)]
 normalisePermute l = \case
   VPi x a b -> normalisePermutePi l x a b
   VSigma x a b -> normalisePermuteSigma l x a b
-  v -> pure $! quote l v // Refl
+  v -> pure (quote l v, Refl)
 
 normalisePermutePi ::
   Level -> Name -> Value -> (Value -> Value) -> [(Term, Iso)]
@@ -660,11 +684,11 @@ normalisePermutePi l = go Refl
       (VSigma y a b) c -> do
         go (i <> Curry) y a \ ~u -> VPi x (b u) \ ~v -> c (VPair u v)
       a b -> do
-        (y, a, b, s) <- reverse (pickDomain l x a b)
-        (ta, ia) <- normalisePermute l a
+        (y, a, b, s) <- pickDomain l x a b
+        ~(ta, ia) <- normalisePermute l a
         let ~v = transportInv ia (VVar l)
-        (tb, ib) <- normalisePermute (l + 1) (b v)
-        pure $! Pi y ta tb // i <> s <> piCongL ia <> piCongR ib
+        ~(tb, ib) <- normalisePermute (l + 1) (b v)
+        pure (Pi y ta tb, i <> s <> piCongL ia <> piCongR ib)
 
 normalisePermuteSigma ::
   Level -> Name -> Value -> (Value -> Value) -> [(Term, Iso)]
@@ -674,11 +698,11 @@ normalisePermuteSigma l = go Refl
       (VSigma y a b) c -> do
         go (i <> Assoc) y a \ ~u -> VSigma x (b u) \ ~v -> c (VPair u v)
       a b -> do
-        (y, a, b, s) <- reverse (pickProjection l x a b)
-        (ta, ia) <- normalisePermute l a
+        (y, a, b, s) <- pickProjection l x a b
+        ~(ta, ia) <- normalisePermute l a
         let ~v = transportInv ia (VVar l)
-        (tb, ib) <- normalisePermute (l + 1) (b v)
-        pure $! Sigma y ta tb // i <> s <> sigmaCongL ia <> sigmaCongR ib
+        ~(tb, ib) <- normalisePermute (l + 1) (b v)
+        pure (Sigma y ta tb, i <> s <> sigmaCongL ia <> sigmaCongR ib)
 
 --------------------------------------------------------------------------------
 
@@ -716,6 +740,9 @@ freshen ns n
       '8' -> '₈'
       '9' -> '₉'
       _ -> error "impossible"
+
+prettyTerm0 :: Term -> String
+prettyTerm0 t = prettyTerm [] 0 t ""
 
 prettyTerm :: [Name] -> Int -> Term -> ShowS
 prettyTerm = go
@@ -757,6 +784,9 @@ prettyTerm = go
       Lam (freshen ns -> n) t ->
         showChar ' ' . showString n . goAbs (n : ns) t
       t -> showString ". " . go ns absP t
+
+prettyIso0 :: Iso -> String
+prettyIso0 i = prettyIso 0 i ""
 
 prettyIso :: Int -> Iso -> ShowS
 prettyIso p = \case

@@ -17,6 +17,7 @@ common defaults
         PatternSynonyms
         Strict
         ViewPatterns
+        DeriveAnyClass
     ghc-options:
         -Wall
         -Wcompat
@@ -39,4 +40,7 @@ executable iso
     build-depends:
         base >=4.16,
         containers,
-        parallel
+        parallel,
+        deepseq,
+        flat,
+        bytestring
