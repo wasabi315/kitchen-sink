@@ -1,3 +1,5 @@
+{-# LANGUAGE MultiWayIf #-}
+
 module Main where
 
 import Control.Applicative
@@ -12,8 +14,8 @@ import Data.Maybe
 import Data.Monoid
 import Data.String
 import Flat
-import GHC.Generics
 import System.Environment
+import Prelude hiding (curry)
 
 infixr 5 -->
 
@@ -102,6 +104,14 @@ foldty2 = quote 0 $
         --> b
         --> b
 
+foldty3 :: Term
+foldty3 = quote 0 $
+  VPi "A" VU \a ->
+    VPi "B" VU \b ->
+      ("List" $$ a)
+        --> ((b *** a --> b) *** b)
+        --> b
+
 listind1 :: Term
 listind1 = quote 0 $
   VPi "A" VU \a ->
@@ -159,6 +169,12 @@ a // b = (a, b)
 
 foldMapA :: (Alternative f, Foldable t) => (a -> f b) -> t a -> f b
 foldMapA f = getAlt . foldMap (Alt . f)
+
+parFoldMapA :: (Alternative m) => Int -> Strategy (m b) -> (a -> m b) -> [a] -> m b
+parFoldMapA fuel strat f xs =
+  if fuel > 0
+    then asum $ parMap strat f xs
+    else foldMapA f xs
 
 --------------------------------------------------------------------------------
 -- Terms
@@ -425,37 +441,48 @@ transportInv i v = case i of
 --------------------------------------------------------------------------------
 -- Type normalisation
 
+data Quant = Quant Name Value (Value -> Value)
+
+-- | curry until the first domain becomes non-sigma
+curry :: Quant -> (Quant, Iso)
+curry = go Refl
+  where
+    go i = \case
+      Quant x (VSigma y a b) c ->
+        go (i <> Curry) $ Quant y a \ ~u -> VPi x (b u) \ ~v -> c (VPair u v)
+      t -> (t, i)
+
+-- | associate until the first projection becomes non-sigma
+assoc :: Quant -> (Quant, Iso)
+assoc = go Refl
+  where
+    go i = \case
+      Quant x (VSigma y a b) c ->
+        go (i <> Assoc) $ Quant y a \ ~u -> VSigma x (b u) \ ~v -> c (VPair u v)
+      t -> (t, i)
+
 normalise0 :: Term -> (Term, Iso)
 normalise0 t = normalise 0 (eval [] t)
 
--- compute the normalised type and isomorphism to it
 normalise :: Level -> Value -> (Term, Iso)
 normalise l = \case
-  VPi x a b -> normalisePi l x a b
-  VSigma x a b -> normaliseSigma l x a b
+  VPi x a b -> normalisePi l (Quant x a b)
+  VSigma x a b -> normaliseSigma l (Quant x a b)
   v -> quote l v // mempty
 
--- currying
-normalisePi :: Level -> Name -> Value -> (Value -> Value) -> (Term, Iso)
-normalisePi l x = \cases
-  (VSigma y a b) c -> do
-    let (t, i) = normalisePi l y a \ ~u -> VPi x (b u) \ ~v -> c (VPair u v)
-    t // Curry <> i
-  a b -> do
-    let (ta, ia) = normalise l a
-        (tb, ib) = normalise (l + 1) (b (transportInv ia (VVar l)))
-    Pi x ta tb // piCongL ia <> piCongR ib
+normalisePi :: Level -> Quant -> (Term, Iso)
+normalisePi l q = do
+  let (Quant x a b, i) = curry q
+      (ta, ia) = normalise l a
+      (tb, ib) = normalise (l + 1) (b $ transportInv ia (VVar l))
+  Pi x ta tb // i <> piCongL ia <> piCongR ib
 
--- make sigmas more right-nested
-normaliseSigma :: Level -> Name -> Value -> (Value -> Value) -> (Term, Iso)
-normaliseSigma l x = \cases
-  (VSigma y a b) c -> do
-    let (t, i) = normaliseSigma l y a \ ~u -> VSigma x (b u) \ ~v -> c (VPair u v)
-    t // Assoc <> i
-  a b -> do
-    let (ta, ia) = normalise l a
-        (tb, ib) = normalise (l + 1) (b (transportInv ia (VVar l)))
-    Sigma x ta tb // sigmaCongL ia <> sigmaCongR ib
+normaliseSigma :: Level -> Quant -> (Term, Iso)
+normaliseSigma l q = do
+  let (Quant x a b, i) = assoc q
+      (ta, ia) = normalise l a
+      (tb, ib) = normalise (l + 1) (b $ transportInv ia (VVar l))
+  Sigma x ta tb // i <> sigmaCongL ia <> sigmaCongR ib
 
 --------------------------------------------------------------------------------
 -- Conversion modulo isomorphism
@@ -487,13 +514,9 @@ instantiatePiAt = \cases
   i ~v (VPi x a b) -> VPi x a (instantiatePiAt (i - 1) v . b)
   _ ~_ _ -> error "instantiatePiAt: not a pi"
 
-pickDomain ::
-  Level ->
-  Name ->
-  Value ->
-  (Value -> Value) ->
-  [(Name, Value, Value -> Value, Iso)]
-pickDomain l x a b = (x, a, b, Refl) : go l b
+-- NOTE: This may make the first domain a sigma type
+pickDomain :: Level -> Quant -> [(Quant, Iso)]
+pickDomain l q@(Quant x a b) = (q, Refl) : go l b
   where
     go l' c = case c (VVar l') of
       VPi _ c1 c2
@@ -502,12 +525,21 @@ pickDomain l x a b = (x, a, b, Refl) : go l b
         let i = coerce (l' - l)
             rest ~vc1 = VPi x a (instantiatePiAt i vc1 . b)
             s = swaps i
-        (y, c1, rest, s) : go (l' + 1) c2
+        (Quant y c1 rest, s) : go (l' + 1) c2
       _ -> []
 
     swaps = \case
       (0 :: Int) -> PiSwap
       n -> piCongR (swaps (n - 1)) <> PiSwap
+
+-- | curry and pickDomain combined
+-- guaranteed that the first domain is non-sigma
+currySwap :: Level -> Quant -> [(Quant, Iso)]
+currySwap l q = do
+  (q, i) <- pure $ curry q
+  (q, j) <- pickDomain l q
+  (q, k) <- pure $ curry q
+  pure $! q // i <> j <> k
 
 instantiateSigmaAt :: Int -> Value -> Value -> Value
 instantiateSigmaAt = \cases
@@ -523,13 +555,9 @@ dropLastProjection l = \case
     _ -> a
   _ -> error "dropLastProjection: not a sigma"
 
-pickProjection ::
-  Level ->
-  Name ->
-  Value ->
-  (Value -> Value) ->
-  [(Name, Value, Value -> Value, Iso)]
-pickProjection l x a b = (x, a, b, Refl) : go l b
+-- NOTE: This may make the first projection a sigma type
+pickProjection :: Level -> Quant -> [(Quant, Iso)]
+pickProjection l q@(Quant x a b) = (q, Refl) : go l b
   where
     go l' c = case c (VVar l') of
       VSigma _ c1 c2
@@ -538,131 +566,62 @@ pickProjection l x a b = (x, a, b, Refl) : go l b
         let i = coerce (l' - l)
             rest ~vc1 = VSigma x a (instantiateSigmaAt i vc1 . b)
             s = swaps SigmaSwap i
-        (y, c1, rest, s) : go (l' + 1) c2
+        (Quant y c1 rest, s) : go (l' + 1) c2
       c' | dependsOnLevelsBetween l l' c' -> []
       c' -> do
         let rest ~_ = dropLastProjection l' (VSigma x a b)
             s = swaps Comm (coerce $ l' - l)
-        [("_", c', rest, s)]
+        [(Quant "_" c' rest, s)]
 
     swaps i = \case
       (0 :: Int) -> i
       n -> sigmaCongR (swaps i (n - 1)) <> SigmaSwap
 
+-- | assoc and pickProjection combined
+-- guaranteed that the first projection is non-sigma
+assocSwap :: Level -> Quant -> [(Quant, Iso)]
+assocSwap l q = do
+  (q, i) <- pure $ assoc q
+  (q, j) <- pickProjection l q
+  (q, k) <- pure $ assoc q
+  pure $! q // i <> j <> k
+
 convIso0 :: (MonadPlus m) => Term -> Term -> m Iso
 convIso0 t u = do
-  (i, j) <- convIso 2 0 (eval [] t) (eval [] u)
+  (i, j) <- convIso 3 0 (eval [] t) (eval [] u)
   pure $! i <> sym j
 
 convIso :: (MonadPlus m) => Int -> Level -> Value -> Value -> m (Iso, Iso)
-convIso p l = \cases
+convIso fuel l = \cases
   -- pi is only convertible with pi under the isomorphisms we consider here
-  (VPi _ a b) (VPi _ a' b') -> convPi p l a b a' b'
+  (VPi x a b) (VPi x' a' b') -> convPi fuel l (Quant x a b) (Quant x' a' b')
   (VPi {}) _ -> empty
   _ (VPi {}) -> empty
   -- likewise
-  (VSigma _ a b) (VSigma _ a' b') -> convSigma p l a b a' b'
+  (VSigma x a b) (VSigma x' a' b') -> convSigma fuel l (Quant x a b) (Quant x' a' b')
   (VSigma {}) _ -> empty
   _ (VSigma {}) -> empty
   t u -> (Refl, Refl) <$ guard (conv l t u)
 
-convPi ::
-  (MonadPlus m) =>
-  Int ->
-  Level ->
-  Value ->
-  (Value -> Value) ->
-  Value ->
-  (Value -> Value) ->
-  m (Iso, Iso)
-convPi p l = go Refl Refl
-  where
-    go i i' = \cases
-      -- Curry first
-      (VSigma x a b) c (VSigma x' a' b') c' -> do
-        go
-          (i <> Curry)
-          (i' <> Curry)
-          a
-          (\ ~u -> VPi x (b u) \ ~v -> c (VPair u v))
-          a'
-          (\ ~u' -> VPi x' (b' u') \ ~v' -> c' (VPair u' v'))
-      (VSigma x a b) c a' b' ->
-        go
-          (i <> Curry)
-          i'
-          a
-          (\ ~u -> VPi x (b u) \ ~v -> c (VPair u v))
-          a'
-          b'
-      a b (VSigma x' a' b') c' -> do
-        go
-          i
-          (i' <> Curry)
-          a
-          b
-          a'
-          (\ ~u' -> VPi x' (b' u') \ ~v' -> c' (VPair u' v'))
-      -- Then try different domain orders
-      a b a' b' -> do
-        let branch (_, a', b', s) = do
-              (ia, ia') <- convIso (p - 1) l a a'
-              let ~v = transportInv ia (VVar l)
-                  ~v' = transportInv ia' (VVar l)
-              (ib, ib') <- convIso (p - 1) (l + 1) (b v) (b' v')
-              pure $! i <> piCongL ia <> piCongR ib // i' <> s <> piCongL ia' <> piCongR ib'
-        if p > 0
-          then asum $ parMap rseq branch $ pickDomain l "x" a' b'
-          else foldMapA branch $ pickDomain l "x" a' b'
+convPi :: (MonadPlus m) => Int -> Level -> Quant -> Quant -> m (Iso, Iso)
+convPi fuel l q q' = do
+  let (Quant _ a b, i) = curry q
+  flip (parFoldMapA fuel rseq) (currySwap l q') \(Quant _ a' b', i') -> do
+    (ia, ia') <- convIso (fuel - 1) l a a'
+    let v = transportInv ia (VVar l)
+        v' = transportInv ia' (VVar l)
+    (ib, ib') <- convIso (fuel - 1) (l + 1) (b v) (b' v')
+    pure $! i <> piCongL ia <> piCongR ib // i' <> piCongL ia' <> piCongR ib'
 
-convSigma ::
-  (MonadPlus m) =>
-  Int ->
-  Level ->
-  Value ->
-  (Value -> Value) ->
-  Value ->
-  (Value -> Value) ->
-  m (Iso, Iso)
-convSigma p l = go Refl Refl
-  where
-    go i i' = \cases
-      -- Assoc first
-      (VSigma x a b) c (VSigma x' a' b') c' -> do
-        go
-          (i <> Assoc)
-          (i' <> Assoc)
-          a
-          (\ ~u -> VSigma x (b u) \ ~v -> c (VPair u v))
-          a'
-          (\ ~u' -> VSigma x' (b' u') \ ~v' -> c' (VPair u' v'))
-      (VSigma x a b) c a' b' -> do
-        go
-          (i <> Assoc)
-          i'
-          a
-          (\ ~u -> VSigma x (b u) \ ~v -> c (VPair u v))
-          a'
-          b'
-      a b (VSigma x' a' b') c' -> do
-        go
-          i
-          (i' <> Assoc)
-          a
-          b
-          a'
-          (\ ~u' -> VSigma x' (b' u') \ ~v' -> c' (VPair u' v'))
-      -- Then try different projection orders
-      a b a' b' -> do
-        let branch (_, a', b', s) = do
-              (ia, ia') <- convIso (p - 1) l a a'
-              let ~v = transportInv ia (VVar l)
-                  ~v' = transportInv ia' (VVar l)
-              (ib, ib') <- convIso (p - 1) (l + 1) (b v) (b' v')
-              pure $! i <> sigmaCongL ia <> sigmaCongR ib // i' <> s <> sigmaCongL ia' <> sigmaCongR ib'
-        if p > 0
-          then asum $ parMap rseq branch $ pickProjection l "x" a' b'
-          else foldMapA branch $ pickProjection l "x" a' b'
+convSigma :: (MonadPlus m) => Int -> Level -> Quant -> Quant -> m (Iso, Iso)
+convSigma fuel l q q' = do
+  let (Quant _ a b, i) = assoc q
+  flip (parFoldMapA fuel rseq) (assocSwap l q') \(Quant _ a' b', i') -> do
+    (ia, ia') <- convIso (fuel - 1) l a a'
+    let v = transportInv ia (VVar l)
+        v' = transportInv ia' (VVar l)
+    (ib, ib') <- convIso (fuel - 1) (l + 1) (b v) (b' v')
+    pure $! i <> sigmaCongL ia <> sigmaCongR ib // i' <> sigmaCongL ia' <> sigmaCongR ib'
 
 --------------------------------------------------------------------------------
 -- Type normalisation + Permutation
@@ -672,37 +631,25 @@ normalisePermute0 t = normalisePermute 0 (eval [] t)
 
 normalisePermute :: Level -> Value -> [(Term, Iso)]
 normalisePermute l = \case
-  VPi x a b -> normalisePermutePi l x a b
-  VSigma x a b -> normalisePermuteSigma l x a b
+  VPi x a b -> normalisePermutePi l (Quant x a b)
+  VSigma x a b -> normalisePermuteSigma l (Quant x a b)
   v -> pure (quote l v, Refl)
 
-normalisePermutePi ::
-  Level -> Name -> Value -> (Value -> Value) -> [(Term, Iso)]
-normalisePermutePi l = go Refl
-  where
-    go i x = \cases
-      (VSigma y a b) c -> do
-        go (i <> Curry) y a \ ~u -> VPi x (b u) \ ~v -> c (VPair u v)
-      a b -> do
-        (y, a, b, s) <- pickDomain l x a b
-        ~(ta, ia) <- normalisePermute l a
-        let ~v = transportInv ia (VVar l)
-        ~(tb, ib) <- normalisePermute (l + 1) (b v)
-        pure (Pi y ta tb, i <> s <> piCongL ia <> piCongR ib)
+normalisePermutePi :: Level -> Quant -> [(Term, Iso)]
+normalisePermutePi l q = do
+  (Quant x a b, i) <- currySwap l q
+  (a, ia) <- normalisePermute l a
+  let v = transportInv ia (VVar l)
+  (b, ib) <- normalisePermute (l + 1) (b v)
+  pure $! Pi x a b // i <> piCongL ia <> piCongR ib
 
-normalisePermuteSigma ::
-  Level -> Name -> Value -> (Value -> Value) -> [(Term, Iso)]
-normalisePermuteSigma l = go Refl
-  where
-    go i x = \cases
-      (VSigma y a b) c -> do
-        go (i <> Assoc) y a \ ~u -> VSigma x (b u) \ ~v -> c (VPair u v)
-      a b -> do
-        (y, a, b, s) <- pickProjection l x a b
-        ~(ta, ia) <- normalisePermute l a
-        let ~v = transportInv ia (VVar l)
-        ~(tb, ib) <- normalisePermute (l + 1) (b v)
-        pure (Sigma y ta tb, i <> s <> sigmaCongL ia <> sigmaCongR ib)
+normalisePermuteSigma :: Level -> Quant -> [(Term, Iso)]
+normalisePermuteSigma l q = do
+  (Quant x a b, i) <- assocSwap l q
+  (a, ia) <- normalisePermute l a
+  let v = transportInv ia (VVar l)
+  (b, ib) <- normalisePermute (l + 1) (b v)
+  pure $! Sigma x a b // i <> sigmaCongL ia <> sigmaCongR ib
 
 --------------------------------------------------------------------------------
 
