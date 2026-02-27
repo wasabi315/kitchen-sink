@@ -1,5 +1,3 @@
-{-# LANGUAGE MultiWayIf #-}
-
 module Main where
 
 import Control.Applicative
@@ -10,7 +8,6 @@ import Control.Parallel.Strategies
 import Data.ByteString qualified as BS
 import Data.Coerce
 import Data.Foldable
-import Data.Maybe
 import Data.Monoid
 import Data.String
 import Flat
@@ -32,7 +29,7 @@ main =
     ["bench"] -> do
       Right ts <- unflat @[Term] <$> BS.readFile "bench.bin"
       ts <- evaluate $ force ts
-      for_ ts \t -> fromJust (convIso0 compSquareH t) `seq` pure ()
+      for_ ts \t -> head (convIso0 compSquareH t) `seq` pure ()
     _ -> error "invalid argument"
 
 everyNth :: Int -> [a] -> [a]
@@ -170,9 +167,9 @@ a // b = (a, b)
 foldMapA :: (Alternative f, Foldable t) => (a -> f b) -> t a -> f b
 foldMapA f = getAlt . foldMap (Alt . f)
 
-parFoldMapA :: (Alternative m) => Int -> Strategy (m b) -> (a -> m b) -> [a] -> m b
-parFoldMapA fuel strat f xs =
-  if fuel > 0
+foldMapAParIf :: (Alternative f) => Bool -> Strategy (f b) -> (a -> f b) -> [a] -> f b
+foldMapAParIf par strat f xs =
+  if par
     then asum $ parMap strat f xs
     else foldMapA f xs
 
@@ -406,7 +403,7 @@ sigmaCongR = \case
   Refl -> Refl
   i -> SigmaCongR i
 
--- transport along an isomorphism
+-- | transport a value @v : A@ along an isomorphism @i : A ~ B@
 transport :: Iso -> Value -> Value
 transport i v = case i of
   Refl -> v
@@ -422,7 +419,7 @@ transport i v = case i of
   SigmaCongL i -> transport i (vfst v) `VPair` vsnd v
   SigmaCongR i -> vfst v `VPair` transport i (vsnd v)
 
--- transport back
+-- | transport back a value @v : B@ along an isomorphism @i : A ~ B@
 transportInv :: Iso -> Value -> Value
 transportInv i v = case i of
   Refl -> v
@@ -507,14 +504,7 @@ dependsOnLevelsBetween from to = go to
       SFst sp -> goSpine l sp
       SSnd sp -> goSpine l sp
 
-instantiatePiAt :: Int -> Value -> Value -> Value
-instantiatePiAt = \cases
-  i ~_ _ | i < 0 -> error "instantiatePiAt: negative index"
-  0 ~v (VPi _ _ b) -> b v
-  i ~v (VPi x a b) -> VPi x a (instantiatePiAt (i - 1) v . b)
-  _ ~_ _ -> error "instantiatePiAt: not a pi"
-
--- NOTE: This may make the first domain a sigma type
+-- | Pick a domain without breaking dependencies.
 pickDomain :: Level -> Quant -> [(Quant, Iso)]
 pickDomain l q@(Quant x a b) = (q, Refl) : go l b
   where
@@ -523,39 +513,21 @@ pickDomain l q@(Quant x a b) = (q, Refl) : go l b
         | dependsOnLevelsBetween l l' c1 -> go (l' + 1) c2
       VPi y c1 c2 -> do
         let i = coerce (l' - l)
-            rest ~vc1 = VPi x a (instantiatePiAt i vc1 . b)
+            rest ~vc1 = VPi x a (instPiAt i vc1 . b)
             s = swaps i
         (Quant y c1 rest, s) : go (l' + 1) c2
       _ -> []
+
+    instPiAt = \cases
+      0 ~v (VPi _ _ b) -> b v
+      i ~v (VPi x a b) -> VPi x a (instPiAt (i - 1) v . b)
+      _ ~_ _ -> error "impossible"
 
     swaps = \case
       (0 :: Int) -> PiSwap
       n -> piCongR (swaps (n - 1)) <> PiSwap
 
--- | curry and pickDomain combined
--- guaranteed that the first domain is non-sigma
-currySwap :: Level -> Quant -> [(Quant, Iso)]
-currySwap l q = do
-  (q, i) <- pure $ curry q
-  (q, j) <- pickDomain l q
-  (q, k) <- pure $ curry q
-  pure $! q // i <> j <> k
-
-instantiateSigmaAt :: Int -> Value -> Value -> Value
-instantiateSigmaAt = \cases
-  i ~_ _ | i < 0 -> error "instantiateSigmaAt: negative index"
-  0 ~v (VSigma _ _ b) -> b v
-  i ~v (VSigma x a b) -> VSigma x a (instantiateSigmaAt (i - 1) v . b)
-  _ ~_ _ -> error "instantiateSigmaAt: not a sigma"
-
-dropLastProjection :: Level -> Value -> Value
-dropLastProjection l = \case
-  VSigma x a b -> case b (VVar l) of
-    VSigma {} -> VSigma x a (dropLastProjection (l + 1) . b)
-    _ -> a
-  _ -> error "dropLastProjection: not a sigma"
-
--- NOTE: This may make the first projection a sigma type
+-- | Pick a projection without breaking dependencies.
 pickProjection :: Level -> Quant -> [(Quant, Iso)]
 pickProjection l q@(Quant x a b) = (q, Refl) : go l b
   where
@@ -564,63 +536,102 @@ pickProjection l q@(Quant x a b) = (q, Refl) : go l b
         | dependsOnLevelsBetween l l' c1 -> go (l' + 1) c2
       VSigma y c1 c2 -> do
         let i = coerce (l' - l)
-            rest ~vc1 = VSigma x a (instantiateSigmaAt i vc1 . b)
+            rest ~vc1 = VSigma x a (instSigmaAt i vc1 . b)
             s = swaps SigmaSwap i
         (Quant y c1 rest, s) : go (l' + 1) c2
       c' | dependsOnLevelsBetween l l' c' -> []
       c' -> do
-        let rest ~_ = dropLastProjection l' (VSigma x a b)
+        let rest ~_ = dropLastProj l' (VSigma x a b)
             s = swaps Comm (coerce $ l' - l)
         [(Quant "_" c' rest, s)]
+
+    instSigmaAt = \cases
+      0 ~v (VSigma _ _ b) -> b v
+      i ~v (VSigma x a b) -> VSigma x a (instSigmaAt (i - 1) v . b)
+      _ ~_ _ -> error "impossible"
+
+    dropLastProj l = \case
+      VSigma x a b -> case b (VVar l) of
+        VSigma {} -> VSigma x a (dropLastProj (l + 1) . b)
+        _ -> a
+      _ -> error "impossible"
 
     swaps i = \case
       (0 :: Int) -> i
       n -> sigmaCongR (swaps i (n - 1)) <> SigmaSwap
 
--- | assoc and pickProjection combined
--- guaranteed that the first projection is non-sigma
+-- | Pick a **non-sigma** projection without breaking dependencies.
+-- This works even in the presence of arbitrarily nested sigmas in the type.
 assocSwap :: Level -> Quant -> [(Quant, Iso)]
 assocSwap l q = do
-  (q, i) <- pure $ assoc q
-  (q, j) <- pickProjection l q
-  (q, k) <- pure $ assoc q
-  pure $! q // i <> j <> k
+  -- Pick one projection first.
+  (q, i) <- pickProjection l q
+  case q of
+    -- When the selected projection is a sigma type, we invoke
+    -- assocSwap recursively to make the first projection of the sigma non-sigma!
+    Quant x (VSigma y a b) c -> do
+      (Quant y a b, j) <- assocSwap l (Quant y a b)
+      let -- We transport @c@ along @j@, since @assocSwap@ acts on the first projection.
+          c' ~v = c (transportInv j v)
+          -- Then associate to make the first projection non-sigma.
+          q = Quant y a \ ~u -> VSigma x (b u) \ ~v -> c' (VPair u v)
+      pure $! q // i <> sigmaCongL j <> Assoc
+    q -> pure (q, i)
 
-convIso0 :: (MonadPlus m) => Term -> Term -> m Iso
+-- | Pick a **non-sigma** domain without breaking dependencies.
+-- This works even in the presence of arbitrarily nested sigmas in the type.
+
+--   e.g) currySwap (List A → (B × A → A) × B → B) =
+--          [ ( List A → (B × A → A) × B → B , Refl                    ),
+--            ( (B × A → B) → B → List A → B , ΠSwap · Curry           ),
+--            ( B → (B × A → B) → List A → B , ΠSwap · ΠL Comm · Curry )
+--          ]
+currySwap :: Level -> Quant -> [(Quant, Iso)]
+currySwap l q = do
+  (q, i) <- pickDomain l q
+  case q of
+    Quant x (VSigma y a b) c -> do
+      (Quant y a b, j) <- assocSwap l (Quant y a b)
+      let c' ~v = c (transportInv j v)
+          q = Quant y a \ ~u -> VPi x (b u) \ ~v -> c' (VPair u v)
+      pure $! q // i <> piCongL j <> Curry
+    q -> pure (q, i)
+
+convIso0 :: Term -> Term -> [Iso]
 convIso0 t u = do
   (i, j) <- convIso 3 0 (eval [] t) (eval [] u)
   pure $! i <> sym j
 
-convIso :: (MonadPlus m) => Int -> Level -> Value -> Value -> m (Iso, Iso)
-convIso fuel l = \cases
+convIso :: Int -> Level -> Value -> Value -> [(Iso, Iso)]
+convIso par l = \cases
   -- pi is only convertible with pi under the isomorphisms we consider here
-  (VPi x a b) (VPi x' a' b') -> convPi fuel l (Quant x a b) (Quant x' a' b')
-  (VPi {}) _ -> empty
-  _ (VPi {}) -> empty
+  (VPi x a b) (VPi x' a' b') -> convPi par l (Quant x a b) (Quant x' a' b')
+  (VPi {}) _ -> []
+  _ (VPi {}) -> []
   -- likewise
-  (VSigma x a b) (VSigma x' a' b') -> convSigma fuel l (Quant x a b) (Quant x' a' b')
-  (VSigma {}) _ -> empty
-  _ (VSigma {}) -> empty
+  (VSigma x a b) (VSigma x' a' b') -> convSigma par l (Quant x a b) (Quant x' a' b')
+  (VSigma {}) _ -> []
+  _ (VSigma {}) -> []
   t u -> (Refl, Refl) <$ guard (conv l t u)
 
-convPi :: (MonadPlus m) => Int -> Level -> Quant -> Quant -> m (Iso, Iso)
-convPi fuel l q q' = do
+convPi :: Int -> Level -> Quant -> Quant -> [(Iso, Iso)]
+convPi par l q q' = do
   let (Quant _ a b, i) = curry q
-  flip (parFoldMapA fuel rseq) (currySwap l q') \(Quant _ a' b', i') -> do
-    (ia, ia') <- convIso (fuel - 1) l a a'
+  flip (foldMapAParIf (par > 0) rseq) (currySwap l q') \(Quant _ a' b', i') -> do
+    (ia, ia') <- convIso (par - 1) l a a'
     let v = transportInv ia (VVar l)
         v' = transportInv ia' (VVar l)
-    (ib, ib') <- convIso (fuel - 1) (l + 1) (b v) (b' v')
+    (ib, ib') <- convIso (par - 1) (l + 1) (b v) (b' v')
     pure $! i <> piCongL ia <> piCongR ib // i' <> piCongL ia' <> piCongR ib'
 
-convSigma :: (MonadPlus m) => Int -> Level -> Quant -> Quant -> m (Iso, Iso)
-convSigma fuel l q q' = do
+convSigma :: Int -> Level -> Quant -> Quant -> [(Iso, Iso)]
+convSigma par l q q' = do
   let (Quant _ a b, i) = assoc q
-  flip (parFoldMapA fuel rseq) (assocSwap l q') \(Quant _ a' b', i') -> do
-    (ia, ia') <- convIso (fuel - 1) l a a'
+  flip (foldMapAParIf (par > 0) rseq) (assocSwap l q') \(Quant _ a' b', i') -> do
+    (ia, ia') <- convIso (par - 1) l a a'
     let v = transportInv ia (VVar l)
         v' = transportInv ia' (VVar l)
-    (ib, ib') <- convIso (fuel - 1) (l + 1) (b v) (b' v')
+    (ib, ib') <- convIso (par - 1) (l + 1) (b v) (b' v')
     pure $! i <> sigmaCongL ia <> sigmaCongR ib // i' <> sigmaCongL ia' <> sigmaCongR ib'
 
 --------------------------------------------------------------------------------
