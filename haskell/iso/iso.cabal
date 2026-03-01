@@ -13,7 +13,9 @@ common defaults
     default-extensions:
         BlockArguments
         DerivingStrategies
+        MultiWayIf
         OverloadedStrings
+        OverloadedRecordDot
         PatternSynonyms
         Strict
         ViewPatterns

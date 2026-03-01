@@ -8,6 +8,8 @@ import Control.Parallel.Strategies
 import Data.ByteString qualified as BS
 import Data.Coerce
 import Data.Foldable
+import Data.IntMap.Strict qualified as IM
+import Data.Maybe
 import Data.Monoid
 import Data.String
 import Flat
@@ -24,8 +26,9 @@ main :: IO ()
 main =
   getArgs >>= \case
     ["gen"] -> do
-      let ts = everyNth 5000 $ map fst $ normalisePermute0 compSquareH
-      BS.writeFile "bench.bin" (flat ts)
+      -- let ts = everyNth 5000 $ map fst $ normalisePermute0 compSquareH
+      -- BS.writeFile "bench.bin" (flat ts)
+      pure ()
     ["bench"] -> do
       Right ts <- unflat @[Term] <$> BS.readFile "bench.bin"
       ts <- evaluate $ force ts
@@ -197,11 +200,18 @@ data Term
   deriving stock (Show, Generic)
   deriving anyclass (NFData, Flat)
 
+type Telescope = [(Name, Term)]
+
+piTel :: Telescope -> Term -> Term
+piTel = \cases
+  [] b -> b
+  ((x, a) : tel) b -> piTel tel (Pi x a b)
+
 --------------------------------------------------------------------------------
 -- Values and NbE
 
 newtype Level = Level Int
-  deriving newtype (Eq, Ord, Num, Show)
+  deriving newtype (Eq, Ord, Num, Show, Enum)
 
 data Value
   = VRigid Level Spine
@@ -266,9 +276,12 @@ vsnd = \case
   VTop x sp -> VTop x (SSnd sp)
   _ -> error "vsnd: not a pair"
 
+levelToIndex :: Level -> Level -> Index
+levelToIndex l x = coerce (l - x - 1)
+
 quote :: Level -> Value -> Term
 quote l = \case
-  VRigid x sp -> quoteSpine l (Var $ coerce (l - x - 1)) sp
+  VRigid x sp -> quoteSpine l (Var $ levelToIndex l x) sp
   VTop x sp -> quoteSpine l (Top x) sp
   VU -> U
   VPi x a b -> Pi x (quote l a) (quote (l + 1) (b $ VVar l))
@@ -482,41 +495,141 @@ normaliseSigma l q = do
   Sigma x ta tb // i <> sigmaCongL ia <> sigmaCongR ib
 
 --------------------------------------------------------------------------------
+-- Partial renaming
+
+data PartialRenaming = PRen
+  { dom :: Level,
+    cod :: Level,
+    ren :: IM.IntMap Level
+  }
+  deriving stock (Show)
+
+lift :: PartialRenaming -> PartialRenaming
+lift (PRen dom cod ren) =
+  PRen (dom + 1) (cod + 1) (IM.insert (coerce cod) dom ren)
+
+skip :: PartialRenaming -> PartialRenaming
+skip (PRen dom cod ren) = PRen dom (cod + 1) ren
+
+weak :: PartialRenaming -> PartialRenaming
+weak (PRen dom cod ren) = PRen (dom + 1) cod ren
+
+swapPren :: Level -> Level -> PartialRenaming
+swapPren l l' =
+  PRen l' l' $
+    IM.fromAscList
+      [ ( coerce i,
+          if
+            | i < l -> i
+            | i == l' - 1 -> l
+            | otherwise -> i + 1
+        )
+      | i <- [0 .. l' - 1]
+      ]
+
+rename :: PartialRenaming -> Value -> Maybe Term
+rename pren = \case
+  VRigid (Level x) sp
+    | Just x' <- IM.lookup x (ren pren) ->
+        renameSpine pren (Var $ levelToIndex pren.dom x') sp
+    | otherwise -> Nothing
+  VTop x sp -> renameSpine pren (Top x) sp
+  VU -> pure U
+  VPi x a b -> Pi x <$> rename pren a <*> renameBind pren b
+  VLam x t -> Lam x <$> renameBind pren t
+  VSigma x a b -> Sigma x <$> rename pren a <*> renameBind pren b
+  VPair t u -> Pair <$> rename pren t <*> rename pren u
+
+renameBind :: PartialRenaming -> (Value -> Value) -> Maybe Term
+renameBind pren t = rename (lift pren) (t $ VVar pren.cod)
+
+renameSpine :: PartialRenaming -> Term -> Spine -> Maybe Term
+renameSpine pren t = \case
+  SNil -> pure t
+  SApp sp u -> (:$$) <$> renameSpine pren t sp <*> rename pren u
+  SFst sp -> Fst <$> renameSpine pren t sp
+  SSnd sp -> Snd <$> renameSpine pren t sp
+
+--------------------------------------------------------------------------------
 -- Conversion modulo isomorphism
 
-dependsOnLevelsBetween :: Level -> Level -> Value -> Bool
-dependsOnLevelsBetween from to = go to
-  where
-    go l = \case
-      VRigid x sp -> (from <= x && x <= to) || goSpine l sp
-      VTop _ sp -> goSpine l sp
-      VU -> False
-      VPi _ a b -> go l a || goBind l b
-      VLam _ t -> goBind l t
-      VSigma _ a b -> go l a || goBind l b
-      VPair t u -> go l t || go l u
+data Ctx = Ctx
+  { level :: Level,
+    env :: Env,
+    idRen :: PartialRenaming
+  }
 
-    goBind l t = go (l + 1) (t $ VVar l)
+bind :: Ctx -> Ctx
+bind (Ctx l env idRen) = Ctx (l + 1) (VVar l : env) (lift idRen)
 
-    goSpine l = \case
-      SNil -> False
-      SApp sp t -> goSpine l sp || go l t
-      SFst sp -> goSpine l sp
-      SSnd sp -> goSpine l sp
+-- dependsOnLevelsBetween :: Level -> Level -> Value -> Bool
+-- dependsOnLevelsBetween from to = go to
+--   where
+--     go l = \case
+--       VRigid x sp -> (from <= x && x <= to) || goSpine l sp
+--       VTop _ sp -> goSpine l sp
+--       VU -> False
+--       VPi _ a b -> go l a || goBind l b
+--       VLam _ t -> goBind l t
+--       VSigma _ a b -> go l a || goBind l b
+--       VPair t u -> go l t || go l u
+
+--     goBind l t = go (l + 1) (t $ VVar l)
+
+--     goSpine l = \case
+--       SNil -> False
+--       SApp sp t -> goSpine l sp || go l t
+--       SFst sp -> goSpine l sp
+--       SSnd sp -> goSpine l sp
+
+-- piPermutations :: Ctx -> Value -> [(Term, Iso)]
+-- piPermutations (Ctx l _ idl) = go l [] (weak idl)
+--   where
+--     swaps = \case
+--       0 -> Refl
+--       n -> piCongR (swaps (n - 1)) <> PiSwap
+
+--     go l' tel wk = \case
+--       VPi x a b -> do
+--         let ~rest = do
+--               let a' = fromJust $ rename wk a
+--               go (l' + 1) ((x, a') : tel) (lift wk) (b $ VVar l')
+--         case rename (idl {cod = idl.cod + l' - l}) a of
+--           Nothing -> rest
+--           Just a -> do
+--             let b' = fromJust $ rename (swapPren l (l' + 1)) (b $ VVar l')
+--                 t = Pi x a (piTel tel b')
+--                 s = swaps (l' - l)
+--             (t, s) : rest
+--       _ -> []
 
 -- | Pick a domain without breaking dependencies.
-pickDomain :: Level -> Quant -> [(Quant, Iso)]
-pickDomain l q@(Quant x a b) = (q, Refl) : go l b
+pickDomain :: Ctx -> Quant -> [(Quant, Iso)]
+pickDomain (Ctx l env idl) q@(Quant x a b) = (q, Refl) : go l b
   where
-    go l' c = case c (VVar l') of
-      VPi _ c1 c2
-        | dependsOnLevelsBetween l l' c1 -> go (l' + 1) c2
-      VPi y c1 c2 -> do
-        let i = coerce (l' - l)
-            rest ~vc1 = VPi x a (instPiAt i vc1 . b)
-            s = swaps i
-        (Quant y c1 rest, s) : go (l' + 1) c2
-      _ -> []
+    go l' c =
+      case c (VVar l') of
+        VPi y c1 c2 -> do
+          let i = l' - l
+          case rename (idl {cod = idl.cod + i + 1}) c1 of
+            Nothing -> go (l' + 1) c2
+            Just c1 -> do
+              let c1' = eval env c1
+                  rest ~vc1 = VPi x a (instPiAt i vc1 . b)
+                  s = swaps i
+              (Quant y c1' rest, s) : go (l' + 1) c2
+        _ -> []
+
+    -- go l' c =
+    --   case c (VVar l') of
+    --     VPi _ c1 c2
+    --       | dependsOnLevelsBetween l l' c1 -> go (l' + 1) c2
+    --     VPi y c1 c2 -> do
+    --       let i = l' - l
+    --           rest ~vc1 = VPi x a (instPiAt i vc1 . b)
+    --           s = swaps i
+    --       (Quant y c1 rest, s) : go (l' + 1) c2
+    --     _ -> []
 
     instPiAt = \cases
       0 ~v (VPi _ _ b) -> b v
@@ -524,26 +637,46 @@ pickDomain l q@(Quant x a b) = (q, Refl) : go l b
       _ ~_ _ -> error "impossible"
 
     swaps = \case
-      (0 :: Int) -> PiSwap
+      0 -> Refl
       n -> piCongR (swaps (n - 1)) <> PiSwap
 
 -- | Pick a projection without breaking dependencies.
-pickProjection :: Level -> Quant -> [(Quant, Iso)]
-pickProjection l q@(Quant x a b) = (q, Refl) : go l b
+pickProjection :: Ctx -> Quant -> [(Quant, Iso)]
+pickProjection (Ctx l env idl) q@(Quant x a b) = (q, Refl) : go l b
   where
     go l' c = case c (VVar l') of
-      VSigma _ c1 c2
-        | dependsOnLevelsBetween l l' c1 -> go (l' + 1) c2
       VSigma y c1 c2 -> do
-        let i = coerce (l' - l)
-            rest ~vc1 = VSigma x a (instSigmaAt i vc1 . b)
-            s = swaps SigmaSwap i
-        (Quant y c1 rest, s) : go (l' + 1) c2
-      c' | dependsOnLevelsBetween l l' c' -> []
+        let i = l' - l
+        case rename (idl {cod = idl.cod + i + 1}) c1 of
+          Nothing -> go (l' + 1) c2
+          Just c1 -> do
+            let c1' = eval env c1
+                rest ~vc1 = VSigma x a (instSigmaAt i vc1 . b)
+                s = swaps SigmaSwap i
+            (Quant y c1' rest, s) : go (l' + 1) c2
       c' -> do
-        let rest ~_ = dropLastProj l' (VSigma x a b)
-            s = swaps Comm (coerce $ l' - l)
-        [(Quant "_" c' rest, s)]
+        let i = l' - l
+        case rename (idl {cod = idl.cod + i + 1}) c' of
+          Nothing -> []
+          Just c' -> do
+            let c'' = eval env c'
+                rest ~_ = dropLastProj l' (VSigma x a b)
+                s = swaps Comm i
+            [(Quant "_" c'' rest, s)]
+
+    -- go l' c = case c (VVar l') of
+    --   VSigma _ c1 c2
+    --     | dependsOnLevelsBetween l l' c1 -> go (l' + 1) c2
+    --   VSigma y c1 c2 -> do
+    --     let i = l' - l
+    --         rest ~vc1 = VSigma x a (instSigmaAt i vc1 . b)
+    --         s = swaps SigmaSwap i
+    --     (Quant y c1 rest, s) : go (l' + 1) c2
+    --   c' | dependsOnLevelsBetween l l' c' -> []
+    --   c' -> do
+    --     let rest ~_ = dropLastProj l' (VSigma x a b)
+    --         s = swaps Comm (l' - l)
+    --     [(Quant "_" c' rest, s)]
 
     instSigmaAt = \cases
       0 ~v (VSigma _ _ b) -> b v
@@ -557,20 +690,20 @@ pickProjection l q@(Quant x a b) = (q, Refl) : go l b
       _ -> error "impossible"
 
     swaps i = \case
-      (0 :: Int) -> i
+      0 -> i
       n -> sigmaCongR (swaps i (n - 1)) <> SigmaSwap
 
 -- | Pick a **non-sigma** projection without breaking dependencies.
 -- This works even in the presence of arbitrarily nested sigmas in the type.
-assocSwap :: Level -> Quant -> [(Quant, Iso)]
-assocSwap l q = do
+assocSwap :: Ctx -> Quant -> [(Quant, Iso)]
+assocSwap ctx q = do
   -- Pick one projection first.
-  (q, i) <- pickProjection l q
+  (q, i) <- pickProjection ctx q
   case q of
     -- When the selected projection is a sigma type, we invoke
     -- assocSwap recursively to make the first projection of the sigma non-sigma!
     Quant x (VSigma y a b) c -> do
-      (Quant y a b, j) <- assocSwap l (Quant y a b)
+      (Quant y a b, j) <- assocSwap ctx (Quant y a b)
       let -- We transport @c@ along @j@, since @assocSwap@ acts on the first projection.
           c' ~v = c (transportInv j v)
           -- Then associate to make the first projection non-sigma.
@@ -586,12 +719,12 @@ assocSwap l q = do
 --            ( (B × A → B) → B → List A → B , ΠSwap · Curry           ),
 --            ( B → (B × A → B) → List A → B , ΠSwap · ΠL Comm · Curry )
 --          ]
-currySwap :: Level -> Quant -> [(Quant, Iso)]
-currySwap l q = do
-  (q, i) <- pickDomain l q
+currySwap :: Ctx -> Quant -> [(Quant, Iso)]
+currySwap ctx q = do
+  (q, i) <- pickDomain ctx q
   case q of
     Quant x (VSigma y a b) c -> do
-      (Quant y a b, j) <- assocSwap l (Quant y a b)
+      (Quant y a b, j) <- assocSwap ctx (Quant y a b)
       let c' ~v = c (transportInv j v)
           q = Quant y a \ ~u -> VPi x (b u) \ ~v -> c' (VPair u v)
       pure $! q // i <> piCongL j <> Curry
@@ -599,68 +732,68 @@ currySwap l q = do
 
 convIso0 :: Term -> Term -> [Iso]
 convIso0 t u = do
-  (i, j) <- convIso 3 0 (eval [] t) (eval [] u)
+  (i, j) <- convIso 3 (Ctx 0 [] (PRen 0 0 mempty)) (eval [] t) (eval [] u)
   pure $! i <> sym j
 
-convIso :: Int -> Level -> Value -> Value -> [(Iso, Iso)]
-convIso par l = \cases
+convIso :: Int -> Ctx -> Value -> Value -> [(Iso, Iso)]
+convIso par ctx = \cases
   -- pi is only convertible with pi under the isomorphisms we consider here
-  (VPi x a b) (VPi x' a' b') -> convPi par l (Quant x a b) (Quant x' a' b')
+  (VPi x a b) (VPi x' a' b') -> convPi par ctx (Quant x a b) (Quant x' a' b')
   (VPi {}) _ -> []
   _ (VPi {}) -> []
   -- likewise
-  (VSigma x a b) (VSigma x' a' b') -> convSigma par l (Quant x a b) (Quant x' a' b')
+  (VSigma x a b) (VSigma x' a' b') -> convSigma par ctx (Quant x a b) (Quant x' a' b')
   (VSigma {}) _ -> []
   _ (VSigma {}) -> []
-  t u -> (Refl, Refl) <$ guard (conv l t u)
+  t u -> (Refl, Refl) <$ guard (conv ctx.level t u)
 
-convPi :: Int -> Level -> Quant -> Quant -> [(Iso, Iso)]
-convPi par l q q' = do
+convPi :: Int -> Ctx -> Quant -> Quant -> [(Iso, Iso)]
+convPi par ctx q q' = do
   let (Quant _ a b, i) = curry q
-  flip (foldMapAParIf (par > 0) rseq) (currySwap l q') \(Quant _ a' b', i') -> do
-    (ia, ia') <- convIso (par - 1) l a a'
-    let v = transportInv ia (VVar l)
-        v' = transportInv ia' (VVar l)
-    (ib, ib') <- convIso (par - 1) (l + 1) (b v) (b' v')
+  flip (foldMapAParIf (par > 0) rseq) (currySwap ctx q') \(Quant _ a' b', i') -> do
+    (ia, ia') <- convIso (par - 1) ctx a a'
+    let v = transportInv ia (VVar ctx.level)
+        v' = transportInv ia' (VVar ctx.level)
+    (ib, ib') <- convIso (par - 1) (bind ctx) (b v) (b' v')
     pure $! i <> piCongL ia <> piCongR ib // i' <> piCongL ia' <> piCongR ib'
 
-convSigma :: Int -> Level -> Quant -> Quant -> [(Iso, Iso)]
-convSigma par l q q' = do
+convSigma :: Int -> Ctx -> Quant -> Quant -> [(Iso, Iso)]
+convSigma par ctx q q' = do
   let (Quant _ a b, i) = assoc q
-  flip (foldMapAParIf (par > 0) rseq) (assocSwap l q') \(Quant _ a' b', i') -> do
-    (ia, ia') <- convIso (par - 1) l a a'
-    let v = transportInv ia (VVar l)
-        v' = transportInv ia' (VVar l)
-    (ib, ib') <- convIso (par - 1) (l + 1) (b v) (b' v')
+  flip (foldMapAParIf (par > 0) rseq) (assocSwap ctx q') \(Quant _ a' b', i') -> do
+    (ia, ia') <- convIso (par - 1) ctx a a'
+    let v = transportInv ia (VVar ctx.level)
+        v' = transportInv ia' (VVar ctx.level)
+    (ib, ib') <- convIso (par - 1) (bind ctx) (b v) (b' v')
     pure $! i <> sigmaCongL ia <> sigmaCongR ib // i' <> sigmaCongL ia' <> sigmaCongR ib'
 
 --------------------------------------------------------------------------------
 -- Type normalisation + Permutation
 
-normalisePermute0 :: Term -> [(Term, Iso)]
-normalisePermute0 t = normalisePermute 0 (eval [] t)
+-- normalisePermute0 :: Term -> [(Term, Iso)]
+-- normalisePermute0 t = normalisePermute 0 (eval [] t)
 
-normalisePermute :: Level -> Value -> [(Term, Iso)]
-normalisePermute l = \case
-  VPi x a b -> normalisePermutePi l (Quant x a b)
-  VSigma x a b -> normalisePermuteSigma l (Quant x a b)
-  v -> pure (quote l v, Refl)
+-- normalisePermute :: Level -> Value -> [(Term, Iso)]
+-- normalisePermute l = \case
+--   VPi x a b -> normalisePermutePi l (Quant x a b)
+--   VSigma x a b -> normalisePermuteSigma l (Quant x a b)
+--   v -> pure (quote l v, Refl)
 
-normalisePermutePi :: Level -> Quant -> [(Term, Iso)]
-normalisePermutePi l q = do
-  (Quant x a b, i) <- currySwap l q
-  (a, ia) <- normalisePermute l a
-  let v = transportInv ia (VVar l)
-  (b, ib) <- normalisePermute (l + 1) (b v)
-  pure $! Pi x a b // i <> piCongL ia <> piCongR ib
+-- normalisePermutePi :: Level -> Quant -> [(Term, Iso)]
+-- normalisePermutePi l q = do
+--   (Quant x a b, i) <- currySwap l q
+--   (a, ia) <- normalisePermute l a
+--   let v = transportInv ia (VVar l)
+--   (b, ib) <- normalisePermute (l + 1) (b v)
+--   pure $! Pi x a b // i <> piCongL ia <> piCongR ib
 
-normalisePermuteSigma :: Level -> Quant -> [(Term, Iso)]
-normalisePermuteSigma l q = do
-  (Quant x a b, i) <- assocSwap l q
-  (a, ia) <- normalisePermute l a
-  let v = transportInv ia (VVar l)
-  (b, ib) <- normalisePermute (l + 1) (b v)
-  pure $! Sigma x a b // i <> sigmaCongL ia <> sigmaCongR ib
+-- normalisePermuteSigma :: Level -> Quant -> [(Term, Iso)]
+-- normalisePermuteSigma l q = do
+--   (Quant x a b, i) <- assocSwap l q
+--   (a, ia) <- normalisePermute l a
+--   let v = transportInv ia (VVar l)
+--   (b, ib) <- normalisePermute (l + 1) (b v)
+--   pure $! Sigma x a b // i <> sigmaCongL ia <> sigmaCongR ib
 
 --------------------------------------------------------------------------------
 
