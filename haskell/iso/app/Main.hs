@@ -8,6 +8,7 @@ import Control.Parallel.Strategies
 import Data.ByteString qualified as BS
 import Data.Coerce
 import Data.Foldable
+import Data.Maybe
 import Data.Monoid
 import Data.String
 import Flat
@@ -509,13 +510,14 @@ pickDomain :: Level -> Quant -> [(Quant, Iso)]
 pickDomain l q@(Quant x a b) = (q, Refl) : go l b
   where
     go l' c = case c (VVar l') of
-      VPi _ c1 c2
-        | dependsOnLevelsBetween l l' c1 -> go (l' + 1) c2
-      VPi y c1 c2 -> do
-        let i = coerce (l' - l)
-            rest ~vc1 = VPi x a (instPiAt i vc1 . b)
-            s = swaps i
-        (Quant y c1 rest, s) : go (l' + 1) c2
+      VPi y c1 c2 ->
+        [ (Quant y c1 rest, s)
+        | not $ dependsOnLevelsBetween l l' c1,
+          let i = coerce (l' - l)
+              rest ~vc1 = VPi x a (instPiAt i vc1 . b)
+              s = swaps i
+        ]
+          ++ go (l' + 1) c2
       _ -> []
 
     instPiAt = \cases
@@ -532,18 +534,20 @@ pickProjection :: Level -> Quant -> [(Quant, Iso)]
 pickProjection l q@(Quant x a b) = (q, Refl) : go l b
   where
     go l' c = case c (VVar l') of
-      VSigma _ c1 c2
-        | dependsOnLevelsBetween l l' c1 -> go (l' + 1) c2
-      VSigma y c1 c2 -> do
-        let i = coerce (l' - l)
-            rest ~vc1 = VSigma x a (instSigmaAt i vc1 . b)
-            s = swaps SigmaSwap i
-        (Quant y c1 rest, s) : go (l' + 1) c2
-      c' | dependsOnLevelsBetween l l' c' -> []
-      c' -> do
-        let rest ~_ = dropLastProj l' (VSigma x a b)
-            s = swaps Comm (coerce $ l' - l)
-        [(Quant "_" c' rest, s)]
+      VSigma y c1 c2 ->
+        [ (Quant y c1 rest, s)
+        | not $ dependsOnLevelsBetween l l' c1,
+          let i = coerce (l' - l)
+              rest ~vc1 = VSigma x a (instSigmaAt i vc1 . b)
+              s = swaps SigmaSwap i
+        ]
+          ++ go (l' + 1) c2
+      c ->
+        [ (Quant "_" c rest, s)
+        | not $ dependsOnLevelsBetween l l' c,
+          let rest ~_ = dropLastProj l' (VSigma x a b)
+              s = swaps Comm (coerce $ l' - l)
+        ]
 
     instSigmaAt = \cases
       0 ~v (VSigma _ _ b) -> b v
